@@ -1,12 +1,14 @@
 # acts as a single source of truth for project navigation
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 
-def find_project_root(start: Path | None = None, markers: Iterable[str] = ("pyproject.toml", ".git")) -> Path:
+def find_project_root(
+    start: Path | None = None, markers: Iterable[str] = ("pyproject.toml", ".git")
+) -> Path:
     p = (start or Path(__file__).resolve()).parent
     for candidate in (p, *p.parents):
         if any((candidate / m).exists() for m in markers):
@@ -49,6 +51,7 @@ def verify_paths():
     )
     for directory in required_dirs:
         directory.mkdir(parents=True, exist_ok=True)
+
 
 def file_exists(file_path: Path | str) -> bool:
 
