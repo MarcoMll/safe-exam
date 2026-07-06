@@ -54,6 +54,7 @@ source venv/bin/activate
 
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
+pip install -e .
 pre-commit install
 ```
 
@@ -64,6 +65,24 @@ python -c "import cv2, mediapipe; from ultralytics import YOLO; print('Environme
 ```
 
 On first YOLO run, model weights are downloaded automatically into `models/` (gitignored).
+
+### Run the webcam capture loop (#7)
+
+```bash
+python -m safe_exam.capture
+```
+
+A window opens with the live feed, FPS, and frame size. Press `q` to quit.
+
+To use a different FPS in code:
+
+```python
+from safe_exam.capture.config import CaptureConfig
+from safe_exam.capture.capture_loop import capture_frames
+
+for frame in capture_frames(CaptureConfig(target_fps=5)):
+    ...  # detector code goes here
+```
 
 ## Development workflow
 
@@ -106,7 +125,7 @@ After cloning and completing [Setup](#setup):
 
 ```bash
 git pull origin main
-git checkout -b feature/8-phone-detection   # use your issue number
+git checkout -b feature/name   # use your issue number
 ```
 
 | Issue | Folder | What to build |
@@ -134,7 +153,7 @@ When your branch is ready, open a PR to `main` and include:
 | **Phase 0** (current) | Local detection prototype, threshold tuning, CPU profiling, go/no-go report |
 | **Phase 1** (planned) | SEB integration, flag streaming, server-side recording, professor review UI |
 
-See [GitHub Issues](https://github.com/MarcoMll/safe-exam/issues) for the full task breakdown. Issue #6 blocks all other Phase 0 work.
+See [GitHub Issues](https://github.com/MarcoMll/safe-exam/issues) for the full task breakdown.
 
 ## License
 
