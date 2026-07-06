@@ -1,9 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "safe-exam"
 version = "0.1.0"
 description = "Modular proctoring layer for Safe Exam Browser"
 readme = "README.md"
 requires-python = ">=3.10"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/safe_exam"]
 
 [tool.black]
 line-length = 88
