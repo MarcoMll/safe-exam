@@ -1,5 +1,7 @@
 import numpy as np
 from ultralytics import YOLO
+from ultralytics.engine.results import Results
+
 from safe_exam.utils.paths_initializer import get_paths
 
 class ObjectDetector:
@@ -11,20 +13,20 @@ class ObjectDetector:
         paths = get_paths()
         self.model = YOLO(paths.MODELS_DIR / model_name)
 
-    def detect_phone(self, frame: np.ndarray):
+    def check_for_phone(self, results: list[Results], phone_class: int = 67):
         """
         Performs phone detection on a given frame.
-        :param frame: frame to perform phone detection on
+        :param results: list of prediction results as Result objects, obtained from a frame
         :return: a dictionary with the phone-detection status and confidence
         """
-        results = self.detect(frame, classes=[67])
-
         max_confidence = 0.0
 
         for result in results:
             for box in result.boxes:
+                class_id = int(box.cls[0])
                 confidence = float(box.conf[0])
-                max_confidence = max(max_confidence, confidence)
+                if class_id == phone_class:
+                    max_confidence = max(max_confidence, confidence)
 
         return {
             "phone_detected": max_confidence >= 0.25,
@@ -46,4 +48,3 @@ class ObjectDetector:
             source=frame,
             classes=classes
         )
-
