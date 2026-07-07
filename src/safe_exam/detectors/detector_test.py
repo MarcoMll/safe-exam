@@ -10,10 +10,10 @@ def main():
     config = CaptureConfig(camera_index=1, target_fps=12)
 
     for frame in capture_frames(config):
-        results = detector.detect(frame=frame, classes=[67])
+        results = detector.detect(frame=frame, classes=[67, 0])
 
         phone_lookup_results = detector.look_for_class(
-            results=results, target_class_index=67
+            results=results, target_class_index=67, threshold=0.25
         )
         person_lookup_results = detector.look_for_class(
             results=results, target_class_index=0, threshold=0.25
