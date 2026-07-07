@@ -10,14 +10,16 @@ def main():
 
     for frame in capture_frames(config):
         results = detector.detect(frame)
-        phone_results = detector.check_for_phone(results)
+        phone_results = detector.check_for_object(results, 67)
+        persons_results = detector.count_class(results, 0)
 
         display = results[0].plot()
         cv2.putText(
             display,
             (
-                f"phone_detected: {phone_results['phone_detected']} \n"
-                f"confidence: {phone_results['confidence']:.2f}"
+                f"phone_detected: {phone_results[0]}\n"
+                f"confidence: {phone_results[1]:.2f}\n\n"
+                f"persons_count: {persons_results}\n"
              ),
             (10, 30),
             cv2.FONT_HERSHEY_SIMPLEX,
