@@ -14,13 +14,17 @@ class ObjectDetector:
         paths = get_paths()
         self.model = YOLO(paths.MODELS_DIR / model_name)
 
-    def check_for_phone(self, results: list[Results], phone_class: int = 67):
+    def look_for_class(
+        self, results: list[Results], target_class_index, threshold: float = 0
+    ) -> tuple[bool, float]:
         """
-        Performs phone detection on a given frame.
+        Performs a class-specific object lookup on all detected objects on given frame.
 
         :param results: list of prediction results as Result objects,
             obtained from a frame
-        :return: a dictionary with the phone-detection status and confidence
+        :param target_class_index: COCO index of the target class
+        :param threshold: confidence threshold
+        :return: a tuple with the object detection status and confidence
         """
 
         max_confidence = 0.0
@@ -29,13 +33,33 @@ class ObjectDetector:
             for box in result.boxes:
                 class_id = int(box.cls[0])
                 confidence = float(box.conf[0])
-                if class_id == phone_class:
+                if class_id == target_class_index:
                     max_confidence = max(max_confidence, confidence)
 
-        return {
-            "phone_detected": max_confidence >= 0.25,
-            "confidence": max_confidence,
-        }
+        return (max_confidence >= threshold), max_confidence
+
+    def count_class(
+        self, results: list[Results], target_class_index: int, threshold: float = 0
+    ) -> int:
+        """
+        Counts the number of objects detected by a given class
+        :param results: list of prediction results as Result objects,
+            obtained from a frame
+        :param target_class_index: COCO index of the target class
+        :param threshold: confidence threshold
+        :return: a number of objects detected by a given class
+        """
+        count = 0
+
+        for result in results:
+            for box in result.boxes:
+                class_id = int(box.cls[0])
+                confidence = float(box.conf[0])
+
+                if class_id == target_class_index and confidence >= threshold:
+                    count += 1
+
+        return count
 
     def detect(self, frame: np.ndarray, classes=None):
         """
