@@ -2,31 +2,19 @@ import numpy as np
 from ultralytics import YOLO
 from ultralytics.engine.results import Results
 
+from safe_exam.detectors.object_detector_config import ObjectDetectorConfig
 from safe_exam.utils.paths_initializer import get_paths
 
 
 class ObjectDetector:
-    def __init__(self, model_name: str = "yolo26s.pt"):
-        """
-        Initialize a YOLO-based object detection model.
-        :param model_name: name of the model
-        """
+    def __init__(self, config: ObjectDetectorConfig | None = None):
+        self.config = config or ObjectDetectorConfig()
         paths = get_paths()
-        self.model = YOLO(paths.MODELS_DIR / model_name)
+        self.model = YOLO(paths.MODELS_DIR / self.config.model_name)
 
     def look_for_class(
         self, results: list[Results], target_class_index, threshold: float = 0
     ) -> tuple[bool, float]:
-        """
-        Performs a class-specific object lookup on all detected objects on given frame.
-
-        :param results: list of prediction results as Result objects,
-            obtained from a frame
-        :param target_class_index: COCO index of the target class
-        :param threshold: confidence threshold
-        :return: a tuple with the object detection status and confidence
-        """
-
         max_confidence = 0.0
 
         for result in results:
@@ -41,14 +29,6 @@ class ObjectDetector:
     def count_class(
         self, results: list[Results], target_class_index: int, threshold: float = 0
     ) -> int:
-        """
-        Counts the number of objects detected by a given class
-        :param results: list of prediction results as Result objects,
-            obtained from a frame
-        :param target_class_index: COCO index of the target class
-        :param threshold: confidence threshold
-        :return: a number of objects detected by a given class
-        """
         count = 0
 
         for result in results:
@@ -62,18 +42,7 @@ class ObjectDetector:
         return count
 
     def detect(self, frame: np.ndarray, classes=None):
-        """
-        Performs object detection on a given frame.
-        If classes are not provided, the model will fallback
-            to the default list of classes: 0, 67.
-            (For persons and cell-phones.)
-
-        :param frame: frame to perform object detection on
-        :param classes: list of class indexes
-        :return: list of detected objects
-        """
-
         if classes is None:
-            classes = [0, 67]
+            classes = [self.config.person_class_id, self.config.phone_class_id]
 
         return self.model.predict(source=frame, classes=classes)

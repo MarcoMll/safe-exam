@@ -1,11 +1,14 @@
 import cv2
 
-from safe_exam.capture.capture_loop import capture_frames
-from safe_exam.capture.config import CaptureConfig
+from safe_exam.capture.capture import capture_frames
+from safe_exam.capture.capture_config import CaptureConfig
 from safe_exam.detectors.object_detector import ObjectDetector
 
 
 def main():
+    """
+    Main function to test the object detector.
+    """
     detector = ObjectDetector()
     config = CaptureConfig(camera_index=1, target_fps=12)
 
