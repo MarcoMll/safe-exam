@@ -1,14 +1,18 @@
+import logging
 import time
 
 import cv2
 
-from safe_exam.capture.config import CaptureConfig
+from safe_exam.capture.capture_config import CaptureConfig
+
+logger = logging.getLogger(__name__)
 
 
 def capture_frames(config: CaptureConfig):
     """Yield webcam frames (numpy arrays) at roughly config.target_fps."""
     cap = cv2.VideoCapture(config.camera_index)
     if not cap.isOpened():
+        logger.warning("Could not open camera %s", config.camera_index)
         raise RuntimeError(f"Could not open camera {config.camera_index}")
 
     interval = 1.0 / config.target_fps
@@ -31,7 +35,7 @@ def capture_frames(config: CaptureConfig):
 
 
 def run_capture(config: CaptureConfig | None = None) -> None:
-    """Show the live feed with a debug overlay. Press q to quit."""
+    """Show the live feed with a simple preview overlay. Press q to quit."""
     config = config or CaptureConfig()
 
     frame_count = 0
