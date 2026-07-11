@@ -30,6 +30,7 @@ class HeadPoseResult:
 def create_face_mesh(config: HeadPoseConfig) -> mp.solutions.face_mesh.FaceMesh:
     """Create the MediaPipe face mesh model."""
     return mp.solutions.face_mesh.FaceMesh(
+        max_num_faces=config.max_num_faces,
         min_detection_confidence=config.min_detection_confidence,
         min_tracking_confidence=config.min_tracking_confidence,
     )
