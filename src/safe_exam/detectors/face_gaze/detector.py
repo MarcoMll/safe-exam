@@ -1,6 +1,6 @@
-"""MediaPipe head pose detector (inference only).
+"""MediaPipe face gaze detector (head pose + iris, inference only).
 
-For drawing, use ``safe_exam.detectors.head_pose_overlay``.
+For drawing, use ``safe_exam.detectors.face_gaze.overlay``.
 """
 
 from __future__ import annotations
@@ -11,26 +11,38 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-from safe_exam.detectors.head_pose_config import HeadPoseConfig
+from safe_exam.detectors.face_gaze.config import FaceGazeConfig
+from safe_exam.detectors.face_gaze.iris_estimation import (
+    estimate_iris_offset,
+    select_primary_face,
+)
 
 
 @dataclass
-class HeadPoseResult:
+class FaceGazeResult:
     """Detection output for one frame (no drawing attached)."""
 
     face_detected: bool = False
+    face_count: int = 0
+    head_pitch: float = 0.0
+    head_yaw: float = 0.0
+    eye_pitch: float = 0.0
+    eye_yaw: float = 0.0
     gaze_pitch: float = 0.0
     gaze_yaw: float = 0.0
-    direction: str = "No face detected"
+    iris_offset_x: float = 0.0
+    iris_offset_y: float = 0.0
+    head_direction: str = "No face detected"
     raw_angles: tuple[float | None, float | None, float | None] | None = None
     nose_2d: tuple[float, float] | None = None
     face_landmarks: object | None = None
 
 
-def create_face_mesh(config: HeadPoseConfig) -> mp.solutions.face_mesh.FaceMesh:
+def create_face_mesh(config: FaceGazeConfig) -> mp.solutions.face_mesh.FaceMesh:
     """Create the MediaPipe face mesh model."""
     return mp.solutions.face_mesh.FaceMesh(
         max_num_faces=config.max_num_faces,
+        refine_landmarks=config.refine_landmarks,
         min_detection_confidence=config.min_detection_confidence,
         min_tracking_confidence=config.min_tracking_confidence,
     )
@@ -53,7 +65,7 @@ def extract_pose_points(
     face_landmarks,
     img_w: int,
     img_h: int,
-    config: HeadPoseConfig,
+    config: FaceGazeConfig,
 ) -> tuple[
     list[tuple[int, int]],
     list[tuple[int, int, float]],
@@ -113,14 +125,14 @@ def estimate_head_pose(
 def angles_to_degrees(
     angles: tuple[float | None, float | None, float | None],
 ) -> tuple[float, float]:
-    """Convert raw solvePnP angles to pitch/yaw degrees used by the detector."""
+    """Convert raw solvePnP angles to pitch/yaw degrees."""
     pitch = (angles[0] or 0.0) * 360
     yaw = (angles[1] or 0.0) * 360
     return pitch, yaw
 
 
 def classify_direction(
-    angles: tuple[float, float, float], config: HeadPoseConfig
+    angles: tuple[float, float, float], config: FaceGazeConfig
 ) -> str:
     """Classify head direction from pitch/yaw angles."""
     pitch = angles[0] * 360
@@ -137,30 +149,39 @@ def classify_direction(
     return "Forward"
 
 
-class HeadPoseDetector:
-    """MediaPipe-based head pose detector."""
+class FaceGazeDetector:
+    """MediaPipe-based face gaze detector (head pose + iris)."""
 
-    def __init__(self, config: HeadPoseConfig | None = None):
-        self.config = config or HeadPoseConfig()
+    def __init__(self, config: FaceGazeConfig | None = None):
+        self.config = config or FaceGazeConfig()
         self.face_mesh = create_face_mesh(self.config)
 
-    def detect(self, frame: np.ndarray) -> HeadPoseResult:
-        """Run head pose detection on one frame without drawing."""
+    def detect(self, frame: np.ndarray) -> FaceGazeResult:
+        """Run head pose and iris gaze detection on one frame without drawing."""
         frame_rgb = preprocess_frame(frame)
         results = run_face_mesh(frame_rgb, self.face_mesh)
 
         if not results.multi_face_landmarks:
-            return HeadPoseResult()
+            return FaceGazeResult()
 
-        face_landmarks = results.multi_face_landmarks[0]
+        face_count = len(results.multi_face_landmarks)
         img_h, img_w = frame.shape[:2]
+
+        if self.config.select_largest_face and face_count > 1:
+            face_landmarks = select_primary_face(
+                results.multi_face_landmarks, img_w, img_h
+            )
+        else:
+            face_landmarks = results.multi_face_landmarks[0]
+
         face_2d, face_3d, nose_2d = extract_pose_points(
             face_landmarks, img_w, img_h, self.config
         )
 
         if len(face_2d) != len(self.config.landmark_ids) or nose_2d is None:
-            return HeadPoseResult(
-                direction="Insufficient landmarks",
+            return FaceGazeResult(
+                face_count=face_count,
+                head_direction="Insufficient landmarks",
                 face_landmarks=face_landmarks,
             )
 
@@ -168,19 +189,34 @@ class HeadPoseDetector:
         angles = estimate_head_pose(face_2d, face_3d, camera_matrix)
 
         if angles[0] is None:
-            return HeadPoseResult(
-                direction="Pose estimation failed",
+            return FaceGazeResult(
+                face_count=face_count,
+                head_direction="Pose estimation failed",
                 face_landmarks=face_landmarks,
             )
 
-        gaze_pitch, gaze_yaw = angles_to_degrees(angles)
-        direction = classify_direction(angles, self.config)
+        head_pitch, head_yaw = angles_to_degrees(angles)
+        head_direction = classify_direction(angles, self.config)
 
-        return HeadPoseResult(
+        eye_pitch, eye_yaw, iris_offset_x, iris_offset_y = estimate_iris_offset(
+            face_landmarks, img_w, img_h, self.config
+        )
+
+        gaze_pitch = head_pitch + eye_pitch
+        gaze_yaw = head_yaw + eye_yaw
+
+        return FaceGazeResult(
             face_detected=True,
+            face_count=face_count,
+            head_pitch=head_pitch,
+            head_yaw=head_yaw,
+            eye_pitch=eye_pitch,
+            eye_yaw=eye_yaw,
             gaze_pitch=gaze_pitch,
             gaze_yaw=gaze_yaw,
-            direction=direction,
+            iris_offset_x=iris_offset_x,
+            iris_offset_y=iris_offset_y,
+            head_direction=head_direction,
             raw_angles=angles,
             nose_2d=nose_2d,
             face_landmarks=face_landmarks,

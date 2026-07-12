@@ -2,11 +2,13 @@ import numpy as np
 from ultralytics import YOLO
 from ultralytics.engine.results import Results
 
-from safe_exam.detectors.object_detector_config import ObjectDetectorConfig
+from safe_exam.detectors.object.config import ObjectDetectorConfig
 from safe_exam.utils.paths_initializer import get_paths
 
 
 class ObjectDetector:
+    """YOLO-based object detector for phones and persons."""
+
     def __init__(self, config: ObjectDetectorConfig | None = None):
         self.config = config or ObjectDetectorConfig()
         paths = get_paths()
