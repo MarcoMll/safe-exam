@@ -2,7 +2,7 @@ import cv2
 
 from safe_exam.capture.capture import capture_frames
 from safe_exam.capture.capture_config import CaptureConfig
-from safe_exam.detectors.object_detector import ObjectDetector
+from safe_exam.detectors.object import ObjectDetector
 
 
 def main():
