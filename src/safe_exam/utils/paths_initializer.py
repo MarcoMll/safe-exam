@@ -20,24 +20,21 @@ def find_project_root(
 class ProjectPaths:
     ROOT: Path
     MODELS_DIR: Path
-    DATA_DIR: Path
-    RAW_DIR: Path
-    PROCESSED_DIR: Path
+    DOCS_DIR: Path
+    PHONE_CALIBRATION_RESULTS_DIR: Path
 
 
 def get_paths() -> ProjectPaths:
     root = find_project_root()
-    models = root / "models"
-    data = root / "data"
-    raw = data / "raw"
-    processed = data / "processed"
-
+    docs = root / "docs"
     return ProjectPaths(
         ROOT=root,
-        MODELS_DIR=models,
-        DATA_DIR=data,
-        RAW_DIR=raw,
-        PROCESSED_DIR=processed,
+        MODELS_DIR=root / "models",
+        DOCS_DIR=docs,
+        PHONE_CALIBRATION_RESULTS_DIR=docs
+        / "experiments"
+        / "phone-calibration"
+        / "results",
     )
 
 
@@ -45,9 +42,8 @@ def verify_paths():
     paths = get_paths()
     required_dirs = (
         paths.MODELS_DIR,
-        paths.DATA_DIR,
-        paths.RAW_DIR,
-        paths.PROCESSED_DIR,
+        paths.DOCS_DIR,
+        paths.PHONE_CALIBRATION_RESULTS_DIR,
     )
     for directory in required_dirs:
         directory.mkdir(parents=True, exist_ok=True)
