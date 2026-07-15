@@ -21,14 +21,14 @@ Detectors plug into a shared capture loop and are merged into a single `process_
 ```
 safe-exam/
 ├── .github/workflows/        # CI (lint checks on pull requests)
-├── data/
-│   ├── raw/                  # Local test images/videos (not committed)
-│   └── processed/            # Derived datasets, exports
-├── docs/                     # Findings reports, architecture notes
+├── docs/
+│   └── experiments/
+│       └── phone-calibration/  # Threshold findings + result CSVs (#12)
 ├── models/                   # Downloaded model weights (not committed)
-├── scripts/                  # Standalone demos and experiments
+├── scripts/                  # Standalone demos and calibration tools
 │   ├── detector_test.py      # Object detection only
-│   └── face_gaze_demo.py     # Face gaze (head + iris) only
+│   ├── face_gaze_demo.py     # Face gaze (head + iris) only
+│   └── phone_calibration.py  # Phone threshold calibration (#12)
 ├── src/safe_exam/            # Main application package
 │   ├── capture/              # Webcam capture (#7)
 │   │   ├── capture_config.py
@@ -102,9 +102,12 @@ On first YOLO run, model weights are downloaded automatically into `models/` (gi
 Test individual detectors without the full processor:
 
 ```bash
-python scripts/detector_test.py    # YOLO object detection only
-python scripts/face_gaze_demo.py   # Face gaze (head + iris) only
+python scripts/detector_test.py       # YOLO object detection only
+python scripts/face_gaze_demo.py      # Face gaze (head + iris) only
+python scripts/phone_calibration.py   # Phone threshold calibration (#12)
 ```
+
+Calibration findings and how to reproduce them: [`docs/experiments/phone-calibration/`](docs/experiments/phone-calibration/).
 
 ### Run the webcam capture loop (#7)
 
@@ -229,6 +232,7 @@ git checkout -b feature/name   # use your issue number
 | #9 | `src/safe_exam/detectors/object/` | Person count (YOLO) |
 | #10 | `src/safe_exam/detectors/face_gaze/` | Gaze estimation (MediaPipe head + iris) |
 | #11 | `src/safe_exam/processor/` | Unified `process_frame()` → `FrameResult` |
+| #12 | `docs/experiments/phone-calibration/` | Phone threshold calibration |
 
 Put shared helpers (config, logging) in `src/safe_exam/utils/`. Do not push directly to `main`.
 
