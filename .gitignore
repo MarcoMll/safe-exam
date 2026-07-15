@@ -27,12 +27,6 @@ build/
 models/*.pt
 models/*.onnx
 
-# Local data (keep directory structure via .gitkeep)
-data/raw/*
-!data/raw/.gitkeep
-data/processed/*
-!data/processed/.gitkeep
-
 # OS
 .DS_Store
 Thumbs.db
