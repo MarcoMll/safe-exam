@@ -47,4 +47,4 @@ class ObjectDetector:
         if classes is None:
             classes = [self.config.person_class_id, self.config.phone_class_id]
 
-        return self.model.predict(source=frame, classes=classes)
+        return self.model.predict(source=frame, classes=classes, verbose=False)
