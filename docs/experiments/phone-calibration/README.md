@@ -8,8 +8,17 @@ This is also the default in [`ObjectDetectorConfig.confidence_threshold`](../../
 
 ## How to run
 
+Tooling lives in [`scripts/experiments/phone_calibration/`](../../../scripts/experiments/phone_calibration/) (durable experiment package). Findings and CSVs stay in this docs folder.
+
+| Module | Role |
+|--------|------|
+| `__main__.py` | CLI entrypoint |
+| `record.py` | Live capture session (camera) |
+| `analyze.py` | `--summarize` (no camera) |
+
 ```bash
-python scripts/phone_calibration.py --experiment your_experiment_name
+cd scripts
+python -m experiments.phone_calibration --experiment your_experiment_name
 ```
 
 | Control | Action |
@@ -28,8 +37,9 @@ docs/experiments/phone-calibration/results/<experiment>/phone_calibration.csv
 Reprint stats from an existing CSV (no camera):
 
 ```bash
-python scripts/phone_calibration.py --summarize
-python scripts/phone_calibration.py --summarize path/to/phone_calibration.csv
+cd scripts
+python -m experiments.phone_calibration --summarize
+python -m experiments.phone_calibration --summarize path/to/phone_calibration.csv
 ```
 
 ### Naming scenarios
@@ -124,7 +134,8 @@ Normal exam behavior (empty frame, fidgeting, looking around, hand-to-face, pen,
 Use a new experiment name (or append to the same one if conditions are unchanged):
 
 ```bash
-python scripts/phone_calibration.py --experiment experiment_2_laptop_webcam
+cd scripts
+python -m experiments.phone_calibration --experiment experiment_2_laptop_webcam
 ```
 
 Document notable findings in this README and commit the CSV under `results/<experiment>/`.

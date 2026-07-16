@@ -22,19 +22,19 @@ class ProjectPaths:
     MODELS_DIR: Path
     DOCS_DIR: Path
     PHONE_CALIBRATION_RESULTS_DIR: Path
+    GAZE_CALIBRATION_RESULTS_DIR: Path
 
 
 def get_paths() -> ProjectPaths:
     root = find_project_root()
     docs = root / "docs"
+    experiments = docs / "experiments"
     return ProjectPaths(
         ROOT=root,
         MODELS_DIR=root / "models",
         DOCS_DIR=docs,
-        PHONE_CALIBRATION_RESULTS_DIR=docs
-        / "experiments"
-        / "phone-calibration"
-        / "results",
+        PHONE_CALIBRATION_RESULTS_DIR=experiments / "phone-calibration" / "results",
+        GAZE_CALIBRATION_RESULTS_DIR=experiments / "gaze-calibration" / "results",
     )
 
 
@@ -44,6 +44,7 @@ def verify_paths():
         paths.MODELS_DIR,
         paths.DOCS_DIR,
         paths.PHONE_CALIBRATION_RESULTS_DIR,
+        paths.GAZE_CALIBRATION_RESULTS_DIR,
     )
     for directory in required_dirs:
         directory.mkdir(parents=True, exist_ok=True)

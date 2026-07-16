@@ -3,8 +3,17 @@
 import time
 from dataclasses import dataclass
 
-from safe_exam.detectors.face_gaze import FaceGazeConfig
+from safe_exam.processor.attention_policy import (
+    AttentionPolicyConfig,
+    is_attention_off_center,
+)
 from safe_exam.processor.frame_result import FrameResult
+
+_DEBUG_COUNTER_ATTRS = {
+    "head": "head_off_center_frames",
+    "eye": "eye_off_center_frames",
+    "gaze": "gaze_off_center_frames",
+}
 
 
 @dataclass
@@ -16,22 +25,39 @@ class ProcessorRunStats:
     face_detected_frames: int = 0
     head_off_center_frames: int = 0
     eye_off_center_frames: int = 0
+    gaze_off_center_frames: int = 0
+    attention_off_center_frames: int = 0
 
 
-def is_head_off_center(result: FrameResult, config: FaceGazeConfig) -> bool:
-    """Return True when head pitch/yaw exceed configured thresholds."""
-    return (
-        abs(result.head_yaw) > config.yaw_threshold_deg
-        or abs(result.head_pitch) > config.pitch_threshold_deg
-    )
+def update_from_frame(
+    stats: ProcessorRunStats,
+    result: FrameResult,
+    active_policy: AttentionPolicyConfig,
+    *,
+    inference_time_ms: float = 0.0,
+    debug_policies: dict[str, AttentionPolicyConfig] | None = None,
+) -> None:
+    """Update session counters from one processed frame."""
+    stats.frame_count += 1
+    stats.total_inference_time_ms += inference_time_ms
 
+    if result.phone_detected:
+        stats.phone_detected_frames += 1
+    if result.extra_person_detected:
+        stats.extra_person_frames += 1
+    if not result.face_detected:
+        return
 
-def is_eye_off_center(result: FrameResult, config: FaceGazeConfig) -> bool:
-    """Return True when iris eye offset exceeds configured thresholds."""
-    return (
-        abs(result.eye_yaw) > config.eye_yaw_threshold_deg
-        or abs(result.eye_pitch) > config.eye_pitch_threshold_deg
-    )
+    stats.face_detected_frames += 1
+
+    if debug_policies:
+        for name, policy in debug_policies.items():
+            attr = _DEBUG_COUNTER_ATTRS.get(name)
+            if attr and is_attention_off_center(result, policy):
+                setattr(stats, attr, getattr(stats, attr) + 1)
+
+    if is_attention_off_center(result, active_policy):
+        stats.attention_off_center_frames += 1
 
 
 def build_summary(
@@ -54,4 +80,6 @@ def build_summary(
         "face_detected_frames": stats.face_detected_frames,
         "head_off_center_frames": stats.head_off_center_frames,
         "eye_off_center_frames": stats.eye_off_center_frames,
+        "gaze_off_center_frames": stats.gaze_off_center_frames,
+        "attention_off_center_frames": stats.attention_off_center_frames,
     }

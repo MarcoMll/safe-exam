@@ -23,12 +23,21 @@ safe-exam/
 ├── .github/workflows/        # CI (lint checks on pull requests)
 ├── docs/
 │   └── experiments/
-│       └── phone-calibration/  # Threshold findings + result CSVs (#12)
+│       ├── phone-calibration/  # Threshold findings + result CSVs (#12)
+│       └── gaze-calibration/   # Off-screen duration findings (#13)
 ├── models/                   # Downloaded model weights (not committed)
-├── scripts/                  # Standalone demos and calibration tools
-│   ├── detector_test.py      # Object detection only
-│   ├── face_gaze_demo.py     # Face gaze (head + iris) only
-│   └── phone_calibration.py  # Phone threshold calibration (#12)
+├── scripts/                  # Standalone tools
+│   ├── detector_test.py      # One-off YOLO demo
+│   ├── face_gaze_demo.py     # One-off face-gaze demo
+│   └── experiments/          # Durable experiment tools (kept long-term)
+│       ├── phone_calibration/
+│       │   ├── __main__.py   # CLI entrypoint
+│       │   ├── record.py     # Live capture session
+│       │   └── analyze.py    # Summarize (no camera)
+│       └── gaze_calibration/
+│           ├── __main__.py   # CLI entrypoint
+│           ├── record.py     # Live capture session
+│           └── analyze.py    # Summarize + backtest (no camera)
 ├── src/safe_exam/            # Main application package
 │   ├── capture/              # Webcam capture (#7)
 │   │   ├── capture_config.py
@@ -46,8 +55,10 @@ safe-exam/
 │   ├── processor/            # Unified frame processor (#11)
 │   │   ├── frame_result.py   # FrameResult schema
 │   │   ├── frame_processor.py
-│   │   ├── debug_overlay.py  # composite debug view
-│   │   └── session_stats.py
+│   │   ├── attention_policy.py  # runtime off-center interpretation
+│   │   ├── session_stats.py  # session counters + summaries
+│   │   ├── runner.py         # live capture loop
+│   │   └── debug_overlay.py  # composite debug view
 │   └── utils/                # Shared helpers (logging, paths)
 ├── requirements.txt          # Runtime dependencies
 ├── requirements-dev.txt      # Dev tools (formatting, linting, hooks)
@@ -64,6 +75,22 @@ from safe_exam.processor.frame_result import FrameResult
 ```
 
 Each detector subpackage follows the same layout: `config.py`, `detector.py`, `overlay.py`. The face gaze subpackage also has `iris_estimation.py` for internal iris math.
+
+### Processor architecture
+
+The `processor/` package has a few clear roles:
+
+| Module | Role |
+|--------|------|
+| `frame_processor.py` | Run detectors and merge one `FrameResult` per frame |
+| `attention_policy.py` | Choose which signal counts as off-center (`head` / `eye` / `gaze` / `iris`) |
+| `session_stats.py` | Aggregate session counters from processed frames |
+| `runner.py` | Live capture loop (orchestration) |
+| `__main__.py` | CLI entrypoint only |
+
+Detectors **compute** raw signals. The processor **interprets** them via `attention_policy.py` and **aggregates** them via `session_stats.py`. Calibration experiments under `docs/experiments/` help choose policy values; they do not change detector internals.
+
+Phase 1 will add flag logic (duration streaks, pattern detection, professor-facing flags) on top of this layer — not inside individual detectors.
 
 ## Setup
 
@@ -104,10 +131,31 @@ Test individual detectors without the full processor:
 ```bash
 python scripts/detector_test.py       # YOLO object detection only
 python scripts/face_gaze_demo.py      # Face gaze (head + iris) only
-python scripts/phone_calibration.py   # Phone threshold calibration (#12)
 ```
 
-Calibration findings and how to reproduce them: [`docs/experiments/phone-calibration/`](docs/experiments/phone-calibration/).
+### Experiment calibration tools
+
+Durable tools for threshold experiments (kept long-term). Findings live under `docs/experiments/`; the tools live under `scripts/experiments/`.
+
+Run from the `scripts/` directory so the experiment packages are importable:
+
+```bash
+cd scripts
+
+# Phone threshold calibration (#12)
+python -m experiments.phone_calibration --experiment <name>
+python -m experiments.phone_calibration --summarize
+
+# Gaze off-screen calibration (#13)
+python -m experiments.gaze_calibration --experiment <name>
+python -m experiments.gaze_calibration --backtest
+python -m experiments.gaze_calibration --summarize
+```
+
+Calibration findings:
+
+- Phone: [`docs/experiments/phone-calibration/`](docs/experiments/phone-calibration/)
+- Gaze: [`docs/experiments/gaze-calibration/`](docs/experiments/gaze-calibration/)
 
 ### Run the webcam capture loop (#7)
 
@@ -179,7 +227,7 @@ Extra-person cheating signals use YOLO (`person_count`). Subtle gaze cheating (h
 
 **Debug overlays:** per-detector drawing lives in each subpackage (`face_gaze/overlay.py`, `object/overlay.py`). The processor composes them in `processor/debug_overlay.py` for the full pipeline view.
 
-**Session logging:** `processor/session_stats.py` tracks frame counts including `head_off_center_frames` and `eye_off_center_frames` (logged every 60 frames).
+**Session logging:** `processor/session_stats.py` tracks frame counts including raw per-signal counters (`head_off_center_frames`, `eye_off_center_frames`, `gaze_off_center_frames`) plus `attention_off_center_frames` for the active runtime policy (logged every 60 frames).
 
 ## Development workflow
 
@@ -232,7 +280,8 @@ git checkout -b feature/name   # use your issue number
 | #9 | `src/safe_exam/detectors/object/` | Person count (YOLO) |
 | #10 | `src/safe_exam/detectors/face_gaze/` | Gaze estimation (MediaPipe head + iris) |
 | #11 | `src/safe_exam/processor/` | Unified `process_frame()` → `FrameResult` |
-| #12 | `docs/experiments/phone-calibration/` | Phone threshold calibration |
+| #12 | `scripts/experiments/phone_calibration/` + `docs/experiments/phone-calibration/` | Phone threshold calibration |
+| #13 | `scripts/experiments/gaze_calibration/` + `docs/experiments/gaze-calibration/` | Gaze off-screen duration calibration |
 
 Put shared helpers (config, logging) in `src/safe_exam/utils/`. Do not push directly to `main`.
 
