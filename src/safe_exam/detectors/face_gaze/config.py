@@ -21,7 +21,7 @@ class FaceGazeConfig:
 
     yaw_threshold_deg: float = 10.0
     pitch_threshold_deg: float = 10.0
-    eye_yaw_threshold_deg: float = 5.0
+    eye_yaw_threshold_deg: float = 3.0
     eye_pitch_threshold_deg: float = 5.0
     eye_offset_scale: float = 30.0
 
