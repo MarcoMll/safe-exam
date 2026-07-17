@@ -1,5 +1,4 @@
 from safe_exam.detectors.object.config import ObjectDetectorConfig
-from safe_exam.detectors.object.overlay import draw_object_overlay
 from safe_exam.detectors.object.results import DetectedBox
 
 __all__ = [
@@ -15,4 +14,8 @@ def __getattr__(name: str):
         from safe_exam.detectors.object.detector import ObjectDetector
 
         return ObjectDetector
+    if name == "draw_object_overlay":
+        from safe_exam.detectors.object.overlay import draw_object_overlay
+
+        return draw_object_overlay
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
