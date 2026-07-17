@@ -16,6 +16,10 @@ from safe_exam.processor.attention_policy import (
 )
 from safe_exam.processor.debug_overlay import draw_composite_overlay
 from safe_exam.processor.frame_processor import process_frame
+from safe_exam.processor.intrusion_policy import (
+    DEFAULT_INTRUSION_POLICY,
+    IntrusionPolicyConfig,
+)
 from safe_exam.processor.session_stats import (
     ProcessorRunStats,
     build_summary,
@@ -31,14 +35,14 @@ def _log_summary(summary: dict[str, float | int], *, stopped: bool = False) -> N
     if stopped:
         logger.info(
             "processor stopped | total_frames=%s avg_inference_ms=%.1f "
-            "avg_fps=%.2f phone_frames=%s extra_person_frames=%s "
+            "avg_fps=%.2f phone_frames=%s intrusion_frames=%s "
             "face_frames=%s head_off_center=%s eye_off_center=%s "
             "gaze_off_center=%s attention_off_center=%s",
             summary["frame_count"],
             summary["avg_inference_ms"],
             summary["avg_fps"],
             summary["phone_detected_frames"],
-            summary["extra_person_frames"],
+            summary["intrusion_suspected_frames"],
             summary["face_detected_frames"],
             summary["head_off_center_frames"],
             summary["eye_off_center_frames"],
@@ -49,14 +53,14 @@ def _log_summary(summary: dict[str, float | int], *, stopped: bool = False) -> N
 
     logger.info(
         "frames=%s avg_inference_ms=%.1f avg_fps=%.2f "
-        "phone_frames=%s extra_person_frames=%s face_frames=%s "
+        "phone_frames=%s intrusion_frames=%s face_frames=%s "
         "head_off_center=%s eye_off_center=%s gaze_off_center=%s "
         "attention_off_center=%s",
         summary["frame_count"],
         summary["avg_inference_ms"],
         summary["avg_fps"],
         summary["phone_detected_frames"],
-        summary["extra_person_frames"],
+        summary["intrusion_suspected_frames"],
         summary["face_detected_frames"],
         summary["head_off_center_frames"],
         summary["eye_off_center_frames"],
@@ -71,9 +75,11 @@ def run_processor(
     camera_index: int = 0,
     target_fps: float = 12.0,
     attention_policy: AttentionPolicyConfig | None = None,
+    intrusion_policy: IntrusionPolicyConfig | None = None,
 ) -> None:
     """Run the integrated capture + detection pipeline."""
     active_policy = attention_policy or DEFAULT_ATTENTION_POLICY
+    active_intrusion_policy = intrusion_policy or DEFAULT_INTRUSION_POLICY
     face_gaze_config = FaceGazeConfig(
         draw_landmarks=debug,
         mirror_preview=False,
@@ -90,11 +96,13 @@ def run_processor(
     session_start = time.perf_counter()
 
     logger.info(
-        "Process started | camera_index=%s target_fps=%s debug=%s policy=%s",
+        "Process started | camera_index=%s target_fps=%s debug=%s "
+        "attention_policy=%s intrusion_policy=%s",
         capture_config.camera_index,
         capture_config.target_fps,
         debug,
         active_policy.label(),
+        active_intrusion_policy.label(),
     )
 
     try:
@@ -104,6 +112,7 @@ def run_processor(
                 stats,
                 output.result,
                 active_policy,
+                active_intrusion_policy,
                 inference_time_ms=output.inference_time_ms,
                 debug_policies=DEBUG_SIGNAL_POLICIES,
             )
@@ -116,6 +125,7 @@ def run_processor(
                     yolo_results=output.yolo_results,
                     result=output.result,
                     inference_time_ms=output.inference_time_ms,
+                    intrusion_policy=active_intrusion_policy,
                     face_gaze_result=output.face_gaze_result,
                     face_gaze_config=face_gaze_detector.config,
                 )

@@ -8,6 +8,10 @@ from safe_exam.processor.attention_policy import (
     is_attention_off_center,
 )
 from safe_exam.processor.frame_result import FrameResult
+from safe_exam.processor.intrusion_policy import (
+    IntrusionPolicyConfig,
+    is_intrusion_suspected_for_frame,
+)
 
 _DEBUG_COUNTER_ATTRS = {
     "head": "head_off_center_frames",
@@ -21,7 +25,7 @@ class ProcessorRunStats:
     frame_count: int = 0
     total_inference_time_ms: float = 0.0
     phone_detected_frames: int = 0
-    extra_person_frames: int = 0
+    intrusion_suspected_frames: int = 0
     face_detected_frames: int = 0
     head_off_center_frames: int = 0
     eye_off_center_frames: int = 0
@@ -33,6 +37,7 @@ def update_from_frame(
     stats: ProcessorRunStats,
     result: FrameResult,
     active_policy: AttentionPolicyConfig,
+    intrusion_policy: IntrusionPolicyConfig,
     *,
     inference_time_ms: float = 0.0,
     debug_policies: dict[str, AttentionPolicyConfig] | None = None,
@@ -43,8 +48,8 @@ def update_from_frame(
 
     if result.phone_detected:
         stats.phone_detected_frames += 1
-    if result.extra_person_detected:
-        stats.extra_person_frames += 1
+    if is_intrusion_suspected_for_frame(result, intrusion_policy):
+        stats.intrusion_suspected_frames += 1
     if not result.face_detected:
         return
 
@@ -76,7 +81,7 @@ def build_summary(
         "avg_inference_ms": avg_inference_ms,
         "avg_fps": avg_fps,
         "phone_detected_frames": stats.phone_detected_frames,
-        "extra_person_frames": stats.extra_person_frames,
+        "intrusion_suspected_frames": stats.intrusion_suspected_frames,
         "face_detected_frames": stats.face_detected_frames,
         "head_off_center_frames": stats.head_off_center_frames,
         "eye_off_center_frames": stats.eye_off_center_frames,

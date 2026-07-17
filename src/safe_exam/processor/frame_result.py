@@ -1,6 +1,7 @@
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
-from safe_exam.detectors.face_gaze import FaceGazeResult
+from safe_exam.detectors.face_gaze.results import FaceGazeResult
+from safe_exam.detectors.object.results import DetectedBox
 
 
 @dataclass
@@ -10,7 +11,9 @@ class FrameResult:
     phone_detected: bool = False
     phone_confidence: float = 0.0
     person_count: int = 0
-    extra_person_detected: bool = False
+    person_boxes: list[DetectedBox] = field(default_factory=list)
+    frame_width: int = 0
+    frame_height: int = 0
 
     face_detected: bool = False
     head_pitch: float = 0.0
