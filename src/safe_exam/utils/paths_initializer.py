@@ -23,6 +23,7 @@ class ProjectPaths:
     DOCS_DIR: Path
     PHONE_CALIBRATION_RESULTS_DIR: Path
     GAZE_CALIBRATION_RESULTS_DIR: Path
+    PERSON_INTRUSION_CALIBRATION_RESULTS_DIR: Path
 
 
 def get_paths() -> ProjectPaths:
@@ -35,6 +36,9 @@ def get_paths() -> ProjectPaths:
         DOCS_DIR=docs,
         PHONE_CALIBRATION_RESULTS_DIR=experiments / "phone-calibration" / "results",
         GAZE_CALIBRATION_RESULTS_DIR=experiments / "gaze-calibration" / "results",
+        PERSON_INTRUSION_CALIBRATION_RESULTS_DIR=(
+            experiments / "person-intrusion" / "results"
+        ),
     )
 
 
@@ -45,6 +49,7 @@ def verify_paths():
         paths.DOCS_DIR,
         paths.PHONE_CALIBRATION_RESULTS_DIR,
         paths.GAZE_CALIBRATION_RESULTS_DIR,
+        paths.PERSON_INTRUSION_CALIBRATION_RESULTS_DIR,
     )
     for directory in required_dirs:
         directory.mkdir(parents=True, exist_ok=True)
