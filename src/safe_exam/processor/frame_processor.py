@@ -33,16 +33,19 @@ def process_frame(
         threshold=config.confidence_threshold,
     )
 
-    person_count = object_detector.count_class(
+    person_boxes = object_detector.list_boxes(
         results=yolo_results,
         target_class_index=config.person_class_id,
         threshold=config.confidence_threshold,
     )
+    frame_height, frame_width = frame.shape[:2]
 
     result.phone_detected = phone_detected
     result.phone_confidence = phone_confidence
-    result.person_count = person_count
-    result.extra_person_detected = person_count > 1
+    result.person_count = len(person_boxes)
+    result.person_boxes = person_boxes
+    result.frame_width = frame_width
+    result.frame_height = frame_height
 
     result.face_detected = face_gaze_result.face_detected
     result.head_pitch = face_gaze_result.head_pitch

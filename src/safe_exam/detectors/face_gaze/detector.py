@@ -5,8 +5,6 @@ For drawing, use ``safe_exam.detectors.face_gaze.overlay``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -16,26 +14,7 @@ from safe_exam.detectors.face_gaze.iris_estimation import (
     estimate_iris_offset,
     select_primary_face,
 )
-
-
-@dataclass
-class FaceGazeResult:
-    """Detection output for one frame (no drawing attached)."""
-
-    face_detected: bool = False
-    face_count: int = 0
-    head_pitch: float = 0.0
-    head_yaw: float = 0.0
-    eye_pitch: float = 0.0
-    eye_yaw: float = 0.0
-    gaze_pitch: float = 0.0
-    gaze_yaw: float = 0.0
-    iris_offset_x: float = 0.0
-    iris_offset_y: float = 0.0
-    head_direction: str = "No face detected"
-    raw_angles: tuple[float | None, float | None, float | None] | None = None
-    nose_2d: tuple[float, float] | None = None
-    face_landmarks: object | None = None
+from safe_exam.detectors.face_gaze.results import FaceGazeResult
 
 
 def create_face_mesh(config: FaceGazeConfig) -> mp.solutions.face_mesh.FaceMesh:

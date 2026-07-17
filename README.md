@@ -20,11 +20,12 @@ Detectors plug into a shared capture loop and are merged into a single `process_
 
 ```
 safe-exam/
-├── .github/workflows/        # CI (lint checks on pull requests)
+├── .github/workflows/        # CI (lint + pytest on pull requests)
 ├── docs/
 │   └── experiments/
 │       ├── phone-calibration/  # Threshold findings + result CSVs (#12)
-│       └── gaze-calibration/   # Off-screen duration findings (#13)
+│       ├── gaze-calibration/   # Off-screen duration findings (#13)
+│       └── person-intrusion/   # Spatial intrusion policy findings (#14)
 ├── models/                   # Downloaded model weights (not committed)
 ├── scripts/                  # Standalone tools
 │   ├── detector_test.py      # One-off YOLO demo
@@ -34,7 +35,11 @@ safe-exam/
 │       │   ├── __main__.py   # CLI entrypoint
 │       │   ├── record.py     # Live capture session
 │       │   └── analyze.py    # Summarize (no camera)
-│       └── gaze_calibration/
+│       ├── gaze_calibration/
+│       │   ├── __main__.py   # CLI entrypoint
+│       │   ├── record.py     # Live capture session
+│       │   └── analyze.py    # Summarize + backtest (no camera)
+│       └── person_intrusion/
 │           ├── __main__.py   # CLI entrypoint
 │           ├── record.py     # Live capture session
 │           └── analyze.py    # Summarize + backtest (no camera)
@@ -45,10 +50,12 @@ safe-exam/
 │   ├── detectors/            # Detection modules (#8–#10)
 │   │   ├── object/           # YOLO — phone + person
 │   │   │   ├── config.py
+│   │   │   ├── results.py    # DetectedBox
 │   │   │   ├── detector.py
 │   │   │   └── overlay.py
 │   │   └── face_gaze/        # MediaPipe — head pose + iris gaze
 │   │       ├── config.py
+│   │       ├── results.py    # FaceGazeResult
 │   │       ├── detector.py
 │   │       ├── overlay.py
 │   │       └── iris_estimation.py  # internal helper
@@ -56,10 +63,13 @@ safe-exam/
 │   │   ├── frame_result.py   # FrameResult schema
 │   │   ├── frame_processor.py
 │   │   ├── attention_policy.py  # runtime off-center interpretation
+│   │   ├── intrusion_policy.py  # spatial multi-person intrusion rules
 │   │   ├── session_stats.py  # session counters + summaries
 │   │   ├── runner.py         # live capture loop
 │   │   └── debug_overlay.py  # composite debug view
 │   └── utils/                # Shared helpers (logging, paths)
+├── tests/                    # Unit tests (pytest; also run in CI)
+│   └── test_intrusion_policy.py
 ├── requirements.txt          # Runtime dependencies
 ├── requirements-dev.txt      # Dev tools (formatting, linting, hooks)
 └── pyproject.toml            # Tool configuration (Black, Ruff)
@@ -74,7 +84,7 @@ from safe_exam.processor.frame_processor import process_frame
 from safe_exam.processor.frame_result import FrameResult
 ```
 
-Each detector subpackage follows the same layout: `config.py`, `detector.py`, `overlay.py`. The face gaze subpackage also has `iris_estimation.py` for internal iris math.
+Each detector subpackage follows the same layout: `config.py`, `results.py`, `detector.py`, `overlay.py`. The face gaze subpackage also has `iris_estimation.py` for internal iris math.
 
 ### Processor architecture
 
@@ -84,11 +94,12 @@ The `processor/` package has a few clear roles:
 |--------|------|
 | `frame_processor.py` | Run detectors and merge one `FrameResult` per frame |
 | `attention_policy.py` | Choose which signal counts as off-center (`head` / `eye` / `gaze` / `iris`) |
+| `intrusion_policy.py` | Spatial rules for multi-person intrusion (ROI / area / overlap) |
 | `session_stats.py` | Aggregate session counters from processed frames |
 | `runner.py` | Live capture loop (orchestration) |
 | `__main__.py` | CLI entrypoint only |
 
-Detectors **compute** raw signals. The processor **interprets** them via `attention_policy.py` and **aggregates** them via `session_stats.py`. Calibration experiments under `docs/experiments/` help choose policy values; they do not change detector internals.
+Detectors **compute** raw signals. The processor **interprets** them via `attention_policy.py` and `intrusion_policy.py`, and **aggregates** them via `session_stats.py`. Calibration experiments under `docs/experiments/` help choose policy values; they do not change detector internals.
 
 Phase 1 will add flag logic (duration streaks, pattern detection, professor-facing flags) on top of this layer — not inside individual detectors.
 
@@ -150,12 +161,18 @@ python -m experiments.phone_calibration --summarize
 python -m experiments.gaze_calibration --experiment <name>
 python -m experiments.gaze_calibration --backtest
 python -m experiments.gaze_calibration --summarize
+
+# Person intrusion policy calibration (#14)
+python -m experiments.person_intrusion --experiment <name>
+python -m experiments.person_intrusion --backtest
+python -m experiments.person_intrusion --summarize
 ```
 
 Calibration findings:
 
 - Phone: [`docs/experiments/phone-calibration/`](docs/experiments/phone-calibration/)
 - Gaze: [`docs/experiments/gaze-calibration/`](docs/experiments/gaze-calibration/)
+- Person intrusion: [`docs/experiments/person-intrusion/`](docs/experiments/person-intrusion/)
 
 ### Run the webcam capture loop (#7)
 
@@ -198,7 +215,7 @@ python -m safe_exam.processor --camera-index 1 --target-fps 5
 | `--camera-index` | `0` | Webcam device index |
 | `--target-fps` | `12` | Target capture frame rate |
 
-Session stats (avg fps, inference time, detection counts, attention counters) are logged every 60 frames and again when the processor stops.
+Session stats (avg fps, inference time, detection counts, attention counters, intrusion counters) are logged every 60 frames and again when the processor stops.
 
 ### Attention signals (head, eye, gaze)
 
@@ -209,7 +226,8 @@ Each `FrameResult` from `process_frame()` is the processor's public per-frame co
 | Field | Meaning |
 |-------|---------|
 | `phone_detected`, `phone_confidence` | Phone present and best confidence |
-| `person_count`, `extra_person_detected` | Number of persons; `True` when count > 1 |
+| `person_count`, `person_boxes` | Raw YOLO person detections (count + bounding boxes) |
+| `frame_width`, `frame_height` | Frame size used by spatial policies |
 
 **Face / attention (MediaPipe)**
 
@@ -223,11 +241,11 @@ Each `FrameResult` from `process_frame()` is the processor's public per-frame co
 | `iris_offset_x`, `iris_offset_y` | Normalized iris position (~`-0.5..0.5`, `0` = centered) |
 | `timestamp` | Unix timestamp for the frame |
 
-Extra-person cheating signals use YOLO (`person_count`). Subtle gaze cheating (head forward, eyes down) is tracked via `eye_pitch` / `eye_yaw` and `iris_offset_*`.
+Person count is raw YOLO output. Whether a visible classmate counts as **intrusion** is decided by `intrusion_policy.py` and aggregated as `intrusion_suspected_frames` in session stats — not by `person_count > 1`. Subtle gaze cheating (head forward, eyes down) is tracked via `eye_pitch` / `eye_yaw` and `iris_offset_*`.
 
 **Debug overlays:** per-detector drawing lives in each subpackage (`face_gaze/overlay.py`, `object/overlay.py`). The processor composes them in `processor/debug_overlay.py` for the full pipeline view.
 
-**Session logging:** `processor/session_stats.py` tracks frame counts including raw per-signal counters (`head_off_center_frames`, `eye_off_center_frames`, `gaze_off_center_frames`) plus `attention_off_center_frames` for the active runtime policy (logged every 60 frames).
+**Session logging:** `processor/session_stats.py` tracks frame counts including raw per-signal counters (`head_off_center_frames`, `eye_off_center_frames`, `gaze_off_center_frames`), `attention_off_center_frames` for the active attention policy, and `intrusion_suspected_frames` for the spatial intrusion policy (logged every 60 frames).
 
 ## Development workflow
 
@@ -258,6 +276,7 @@ Or run all hooks on the whole repo:
 
 ```bash
 pre-commit run --all-files
+pytest tests/
 ```
 
 Configuration lives in `pyproject.toml`.
@@ -282,6 +301,7 @@ git checkout -b feature/name   # use your issue number
 | #11 | `src/safe_exam/processor/` | Unified `process_frame()` → `FrameResult` |
 | #12 | `scripts/experiments/phone_calibration/` + `docs/experiments/phone-calibration/` | Phone threshold calibration |
 | #13 | `scripts/experiments/gaze_calibration/` + `docs/experiments/gaze-calibration/` | Gaze off-screen duration calibration |
+| #14 | `scripts/experiments/person_intrusion/` + `docs/experiments/person-intrusion/` | Person intrusion policy calibration |
 
 Put shared helpers (config, logging) in `src/safe_exam/utils/`. Do not push directly to `main`.
 

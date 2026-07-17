@@ -9,6 +9,10 @@ from safe_exam.detectors.face_gaze import (
 )
 from safe_exam.detectors.object import draw_object_overlay
 from safe_exam.processor.frame_result import FrameResult
+from safe_exam.processor.intrusion_policy import (
+    IntrusionPolicyConfig,
+    is_intrusion_suspected_for_frame,
+)
 
 
 def _put_text(frame, text, x, y, color=(0, 255, 0)):
@@ -27,6 +31,7 @@ def draw_summary_text(
     frame,
     result: FrameResult,
     inference_time_ms: float,
+    intrusion_policy: IntrusionPolicyConfig,
     face_gaze_result: FaceGazeResult | None = None,
 ):
     """Draw unified processor summary text on a frame."""
@@ -41,7 +46,8 @@ def draw_summary_text(
     y += line_h
     _put_text(frame, f"Persons: {result.person_count}", left_x, y)
     y += line_h
-    _put_text(frame, f"Extra person: {result.extra_person_detected}", left_x, y)
+    intrusion_suspected = is_intrusion_suspected_for_frame(result, intrusion_policy)
+    _put_text(frame, f"Intrusion: {intrusion_suspected}", left_x, y)
 
     y = 25
     _put_text(
@@ -99,6 +105,7 @@ def draw_composite_overlay(
     yolo_results,
     result: FrameResult,
     inference_time_ms: float,
+    intrusion_policy: IntrusionPolicyConfig,
     face_gaze_result: FaceGazeResult | None = None,
     face_gaze_config: FaceGazeConfig | None = None,
 ):
@@ -110,4 +117,10 @@ def draw_composite_overlay(
             debug_frame, face_gaze_result, face_gaze_config
         )
 
-    return draw_summary_text(debug_frame, result, inference_time_ms, face_gaze_result)
+    return draw_summary_text(
+        debug_frame,
+        result,
+        inference_time_ms,
+        intrusion_policy,
+        face_gaze_result,
+    )

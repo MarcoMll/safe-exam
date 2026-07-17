@@ -5,8 +5,8 @@ import mediapipe as mp
 import numpy as np
 
 from safe_exam.detectors.face_gaze.config import FaceGazeConfig
-from safe_exam.detectors.face_gaze.detector import FaceGazeResult
 from safe_exam.detectors.face_gaze.iris_estimation import landmark_to_xy
+from safe_exam.detectors.face_gaze.results import FaceGazeResult
 
 
 def draw_nose_overlay(
