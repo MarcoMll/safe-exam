@@ -25,7 +25,8 @@ safe-exam/
 │   └── experiments/
 │       ├── phone-calibration/  # Threshold findings + result CSVs (#12)
 │       ├── gaze-calibration/   # Off-screen duration findings (#13)
-│       └── person-intrusion/   # Spatial intrusion policy findings (#14)
+│       ├── person-intrusion/   # Spatial intrusion policy findings (#14)
+│       └── cpu-profiling/      # CPU/RAM profiling findings (#15)
 ├── models/                   # Downloaded model weights (not committed)
 ├── scripts/                  # Standalone tools
 │   ├── detector_test.py      # One-off YOLO demo
@@ -39,10 +40,13 @@ safe-exam/
 │       │   ├── __main__.py   # CLI entrypoint
 │       │   ├── record.py     # Live capture session
 │       │   └── analyze.py    # Summarize + backtest (no camera)
-│       └── person_intrusion/
+│       ├── person_intrusion/
+│       │   ├── __main__.py   # CLI entrypoint
+│       │   ├── record.py     # Live capture session
+│       │   └── analyze.py    # Summarize + backtest (no camera)
+│       └── cpu_profile/
 │           ├── __main__.py   # CLI entrypoint
-│           ├── record.py     # Live capture session
-│           └── analyze.py    # Summarize + backtest (no camera)
+│           └── profile.py    # Timed CPU/RAM sampling loop
 ├── src/safe_exam/            # Main application package
 │   ├── capture/              # Webcam capture (#7)
 │   │   ├── capture_config.py
@@ -166,6 +170,11 @@ python -m experiments.gaze_calibration --summarize
 python -m experiments.person_intrusion --experiment <name>
 python -m experiments.person_intrusion --backtest
 python -m experiments.person_intrusion --summarize
+
+# CPU / RAM profiling (#15)
+# Drill-down (~30s/mode) then sustained 10-min run at production FPS
+python -m experiments.cpu_profile --experiment <name> --mode all --target-fps 5 --duration 30
+python -m experiments.cpu_profile --experiment <name> --mode both --target-fps 5 --duration 600
 ```
 
 Calibration findings:
@@ -173,6 +182,7 @@ Calibration findings:
 - Phone: [`docs/experiments/phone-calibration/`](docs/experiments/phone-calibration/)
 - Gaze: [`docs/experiments/gaze-calibration/`](docs/experiments/gaze-calibration/)
 - Person intrusion: [`docs/experiments/person-intrusion/`](docs/experiments/person-intrusion/)
+- CPU profiling: [`docs/experiments/cpu-profiling/`](docs/experiments/cpu-profiling/)
 
 ### Run the webcam capture loop (#7)
 
@@ -206,14 +216,14 @@ Optional flags:
 
 ```bash
 python -m safe_exam.processor --no-debug
-python -m safe_exam.processor --camera-index 1 --target-fps 5
+python -m safe_exam.processor --camera-index 1 --target-fps 10
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--no-debug` | off | Headless run — no overlay window |
 | `--camera-index` | `0` | Webcam device index |
-| `--target-fps` | `12` | Target capture frame rate |
+| `--target-fps` | `5` | Target capture frame rate (use `10` for denser local debug; see [cpu-profiling](docs/experiments/cpu-profiling/)) |
 
 Session stats (avg fps, inference time, detection counts, attention counters, intrusion counters) are logged every 60 frames and again when the processor stops.
 
@@ -302,6 +312,7 @@ git checkout -b feature/name   # use your issue number
 | #12 | `scripts/experiments/phone_calibration/` + `docs/experiments/phone-calibration/` | Phone threshold calibration |
 | #13 | `scripts/experiments/gaze_calibration/` + `docs/experiments/gaze-calibration/` | Gaze off-screen duration calibration |
 | #14 | `scripts/experiments/person_intrusion/` + `docs/experiments/person-intrusion/` | Person intrusion policy calibration |
+| #15 | `scripts/experiments/cpu_profile/` + `docs/experiments/cpu-profiling/` | CPU/RAM profiling |
 
 Put shared helpers (config, logging) in `src/safe_exam/utils/`. Do not push directly to `main`.
 

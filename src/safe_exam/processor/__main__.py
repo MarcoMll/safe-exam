@@ -22,8 +22,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--target-fps",
         type=float,
-        default=12.0,
-        help="Target capture frame rate (default: 12)",
+        default=5.0,
+        help=(
+            "Target capture frame rate (default: 5; use 10 for denser "
+            "local debug — see docs/experiments/cpu-profiling/)"
+        ),
     )
     args = parser.parse_args()
     run_processor(
