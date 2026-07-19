@@ -73,7 +73,7 @@ def run_processor(
     *,
     debug: bool = True,
     camera_index: int = 0,
-    target_fps: float = 12.0,
+    target_fps: float = 5.0,
     attention_policy: AttentionPolicyConfig | None = None,
     intrusion_policy: IntrusionPolicyConfig | None = None,
 ) -> None:
