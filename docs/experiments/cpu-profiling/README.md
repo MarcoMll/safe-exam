@@ -154,3 +154,67 @@ xychart-beta
 - [x] Recommended FPS identified (**5** production; **10** denser local; **≥12** rejected)
 - [x] 5 fps vs &lt;30% target discussed (31.5% sustained avg — marginal)
 - [x] YOLO identified as dominant cost via drill-down
+
+## Experiment 2 — laptop
+
+| Field | Value |
+|-------|-------|
+| Experiment id | `experiment_2_laptop` |
+| CPU | Intel64 Family 6 Model 142 Stepping 10, GenuineIntel (**8** logical cores) |
+| OS | Windows 11 (10.0.26200 SP0) |
+| Model stack | `yolo26s.pt` + MediaPipe Face Mesh (refine landmarks) |
+| Protocol | Headless; 15s warmup then measure |
+| Raw CSV | [results/experiment_2_laptop/cpu_profile.csv](results/experiment_2_laptop/cpu_profile.csv) |
+
+### Sustained pipeline (`mode=both`, 10 min)
+
+| Target FPS | Actual FPS | Hit target? | Avg machine CPU % | Peak machine CPU % | Avg process CPU % | Avg RAM MB | Avg inference ms |
+|------------|------------|-------------|-------------------|--------------------|-------------------|------------|------------------|
+| **5** | **2.97** | **No** | **64.0** | 83.3 | 512.1 | 477 | 334.0 |
+| **10** | **3.34** | **No** | **70.9** | 85.4 | 566.9 | 466 | 296.5 |
+| **12** | **3.65** | **No** | **77.0** | 86.2 | 615.7 | 470 | 271.6 |
+| **30** | **3.31** | **No** | **72.3** | 87.0 | 578.3 | 470 | 299.8 |
+
+```mermaid
+xychart-beta
+    title "Target vs actual FPS (10 min, both, laptop)"
+    x-axis ["5", "10", "12", "30"]
+    y-axis "FPS" 0 --> 35
+    bar [2.97, 3.34, 3.65, 3.31]
+```
+
+```mermaid
+xychart-beta
+    title "Avg machine CPU % vs target FPS (10 min, both, laptop)"
+    x-axis ["5", "10", "12", "30"]
+    y-axis "% of machine" 0 --> 100
+    bar [64.0, 70.9, 77.0, 72.3]
+```
+
+### Key findings
+
+1. **Hard ceiling ≈ 3.6 fps** for `both` on this laptop. Raising `target_fps` above 5 does not produce usable gains; actual FPS stays between ~3.0 and ~3.7.
+
+2. **5 fps does not sustain** on this hardware (`2.97` actual). Average machine CPU is **64.0%**, far above the issue's &lt;30% target, with peaks above **83%**.
+
+3. **10–30 fps targets are not useful** here. They still plateau near ~3 fps while driving average machine CPU to **70–77%** and peaks to **85–87%**.
+
+4. **RAM is stable** (~466–477 MB). The bottleneck is compute, not memory.
+
+5. **Laptop implication:** this machine needs a cheaper YOLO path before it can run the production companion comfortably. Options include a smaller model, lower image size, or running YOLO less often than gaze.
+
+### Recommended FPS (this hardware)
+
+| Use case | FPS | Why |
+|----------|-----|-----|
+| **Production / exam companion** | **Do not use current stack** | Fails 5 fps and misses the &lt;30% machine-CPU target by a wide margin (64.0% sustained avg at target 5). |
+| **Weak-hardware fallback test** | **2–3** | Closest to measured capacity, but still needs validation beside SEB + browser because CPU load is already high. |
+| **Calibration / local debug / demos** | **5 max** | Higher targets do not materially improve actual FPS and only add load. |
+| **Do not use as a target** | **≥10** | Cannot sustain; same ~3 fps ceiling while using 70%+ average machine CPU. |
+
+**Issue #15 acceptance (this machine):**
+
+- [x] Hardware + sustained results documented
+- [x] 5 fps production default rejected for this laptop
+- [x] &lt;30% target clearly fails (64.0% sustained avg at target 5)
+- [x] Cheaper YOLO / lower imgsz / frame scheduling identified as required for laptop support
