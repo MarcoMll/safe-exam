@@ -2,9 +2,9 @@
 
 > **Issue #12** — Consolidation of all Phase 0 calibration results.
 > Go/no-go gate for Phase 1.
-> Written: 2026-07-27
+> Written: 2026-07-27 · Updated: 2026-08-01
 >
-> ⚠️ **WIP — awaiting teammate experiment results.** Current data is from one hardware setup (desktop PC). Sections will be updated as teammates add their runs.
+> Incorporates experiment 1 (desktop PC) and experiment 2 (laptop webcam). Runtime policy defaults are **not** changed in this update — recommended directions and open next steps are documented below.
 
 ---
 
@@ -18,8 +18,8 @@ Model: `yolo26s.pt` (COCO pretrained). Single inference call per frame, results 
 **Gaze estimation (MediaPipe FaceMesh)**
 MediaPipe FaceMesh with refined landmarks. Outputs multiple raw signals per frame: `head_yaw`, `head_pitch`, `eye_offset`, `gaze_yaw` (combined head + eye), and `iris_offset`. The runtime attention policy selects one signal and threshold to use as the off-center indicator. All signals are logged regardless of which is active — this allows backtesting without re-recording.
 
-**Person intrusion policy**
-A spatial policy layered on top of raw person count. Rather than flagging any `person_count > 1`, the policy requires a secondary person to satisfy a minimum area fraction, proximity overlap, or center-ROI conditions (2 of 3 rules must match). This distinguishes a background classmate from someone leaning into the camera's close zone.
+**Person intrusion policy (current implementation — under reconsideration)**
+A spatial policy layered on top of raw person count. Rather than flagging any `person_count > 1`, the policy requires a secondary person to satisfy a minimum area fraction, proximity overlap, or center-ROI conditions (2 of 3 rules must match). This distinguishes a background classmate from someone leaning into the camera's close zone. **Team direction after Phase 0 review: retire spatial person-intrusion as the multi-person signal and replace it with multi-face gaze analysis** (see §2 Person / multi-person and §6).
 
 **Capture loop**
 Configurable target FPS (default 5 for production, 10 for debug/calibration). 15-second warmup discarded before profiling. Headless mode available — no debug overlay — for clean CPU measurement.
@@ -45,9 +45,9 @@ Configurable target FPS (default 5 for production, 10 for debug/calibration). 15
 
 ### Gaze off-screen
 
-**Profile B: `gaze_yaw`, `yaw_only`, 5° yaw threshold, 4s duration, 0.4s gap tolerance**
+Gaze thresholds are **camera / setup dependent**. Experiment 1 (desktop PC) and experiment 2 (laptop webcam) produced different workable numbers on the same signal family. The team treats the laptop run as the better orientation for typical exam use and intends to move the policy toward the laptop-sensitive candidate once a labeled repeat confirms it. **Runtime defaults are unchanged in this report.**
 
-Two profiles emerged from backtesting experiment 1:
+#### Experiment 1 — desktop PC (`experiment_1_desktop_pc_camera`)
 
 | | Profile A — Conservative | Profile B — Sensitive |
 |---|---|---|
@@ -62,28 +62,85 @@ Two profiles emerged from backtesting experiment 1:
 | Writing / reading paper | Clean | Clean |
 | Backtest score | 54.19 | 49.65 |
 
-**Current default: Profile B.** It fires on more suspicious behaviors and keeps writing/reading clean — better for debugging and Phase 1 test development. The extra natural FPs (stretch, drink water) are expected to be filtered by Phase 1 duration + pattern logic. Profile A is the conservative alternative for contexts where raw signal noise must be minimized.
+**Current runtime default (unchanged): Profile B** — `gaze_yaw`, yaw_only, 5°, 4s duration, 0.4s gap. It fires on more suspicious behaviors and keeps writing/reading clean on the desktop dataset.
 
-The yaw-only rule is the key finding from this experiment: pitch+yaw symmetric thresholds fail because reading and writing both involve pitch-down, which would flag normal exam behavior at any reasonable threshold.
+The yaw-only rule remains the key shared finding: pitch+yaw symmetric thresholds fail because reading and writing both involve pitch-down, which would flag normal exam behavior at any reasonable threshold.
 
-### Person intrusion
+#### Experiment 2 — laptop webcam (`experiment_2_laptop`)
 
-**Default policy unchanged — not calibrated on real data.**
+On the laptop setup, Profile B (yaw 5°, 4s) is **not safe**: every natural and suspicious scenario fired, including reading, writing, and stretch/drink.
 
-| Parameter | Default value |
+| Scenario | Longest streak @ Profile B (5° / 4s) | Fires? |
+|----------|--------------------------------------|--------|
+| `natural_reading_paper_2_laptop` | 44.94s | Yes — FP |
+| `natural_writting` | 8.28s | Yes — FP |
+| `natural_stretch_and_drink_2_laptop` | 17.49s | Yes — FP |
+| `suspicious_phone_side_2_laptop` | 10.14s | Yes |
+| `suspicious_other_screen_2_laptop` | 23.26s | Yes |
+| `suspicious_phone_under_desk_2_laptop` | 24.29s | Yes |
+
+Laptop candidates that separate natural vs suspicious:
+
+| | Profile C — gaze yaw (preferred direction) | Profile D — eye exploratory |
+|---|---|---|
+| Signal | `gaze_yaw` | `eye` |
+| Mode | yaw_only | both |
+| Yaw | **15°** | 3° |
+| Pitch | 99° (disabled) | 10° |
+| Duration | **4s** (sensitive) or 6s (stricter) | 4s |
+| Gap tolerance | 0.4s | 0.4s |
+| natural_fp | 0 / 3 | 0 / 3 |
+| suspicious_tp | 2 / 3 | 3 / 3 |
+| Writing / reading | Clean | Clean |
+| Under-desk phone | Miss (yaw-only) | Hit (close to threshold) |
+
+**Intended policy direction (not applied yet): Profile C at 4s** — `gaze_yaw`, yaw_only, **15°**, duration **4s**, gap 0.4s. Chosen because:
+
+1. Laptop framing is closer to expected exam orientation than the desktop PC camera.
+2. 4s keeps the raw layer sensitive for Phase 1 debugging and flag logic, while 15° clears natural reading/writing/stretch on the laptop data.
+3. Profile D (`eye`, both axes) remains exploratory — it caught all three suspicious scenarios in experiment 2, but experiment 1 found the eye signal weaker, so it should not become the default from one laptop run.
+
+**Caveat:** experiment 2 used non-canonical scenario labels (`natural_writting`, `natural_reading_paper_2_laptop`), so backtest writing/reading columns are unreliable; manual snapshots and `natural_fp_count` are the safer read. A labeled laptop repeat is required before changing runtime defaults.
+
+#### Profile C snapshot (laptop — intended direction)
+
+`gaze_yaw`, `yaw_only`, yaw `15°`, duration `4s`, gap `0.4s`
+
+| Scenario | Longest streak | Fires @4s? | Assessment |
+|----------|---------------|------------|------------|
+| `natural_reading_paper_2_laptop` | 2.51s | No | Pass |
+| `natural_writting` | 1.30s | No | Pass |
+| `natural_stretch_and_drink_2_laptop` | 2.05s | No | Pass |
+| `suspicious_phone_side_2_laptop` | 8.10s | Yes | Detected |
+| `suspicious_other_screen_2_laptop` | 18.24s | Yes | Detected |
+| `suspicious_phone_under_desk_2_laptop` | 0.00s | No | Miss — yaw-only; needs eye/iris/phone context |
+
+### Person / multi-person (direction change)
+
+**Spatial person-intrusion defaults were never validated on real data** (pilot only). The team has decided **not** to continue calibrating YOLO spatial intrusion as the multi-person product signal.
+
+| Parameter | Default value (current code — not retuned) |
 |-----------|--------------|
 | `roi_center_fraction` | 0.60 |
 | `min_secondary_area_pct` | 0.05 |
 | `primary_overlap_iou` | 0.10 |
 | `min_rules_to_match` | 2 |
 
-Experiment 1 was a pilot with a held laptop and a simulated second person on a monitor — not suitable for threshold tuning. The default policy produced zero false positives across all scenarios (directionally good), but the simulated intruder never triggered because its bbox area (~1.6% of frame) fell below the `min_secondary_area_pct = 0.05` threshold. This means the test never produced a true positive, so no Profile A/B comparison could be made. **The default values have not been validated. A real-setup experiment (helper, fixed-desk, classroom or similar) is required before these numbers can be trusted.**
+Experiment 1 (person intrusion) used a held laptop and a simulated second person on a monitor — unsuitable for threshold tuning. Zero false positives in controls were directionally fine, but the simulated intruder never produced a true positive (bbox area ~1.6% of frame, below `min_secondary_area_pct`).
+
+**New direction:** remove reliance on person-count / spatial intrusion for “second person in scene,” and instead extend **gaze estimation to multiple faces**. Goals:
+
+1. Detect when a second (or background) person is looking toward the examinee’s screen.
+2. Distinguish flags attributed to the **primary student** vs. **third-party / behind-the-student** screen looking in the same frame.
+3. Support richer professor-facing outcomes (e.g. this student cheating vs. cheating visible in frame but not performed by the seated student).
+
+This is a Phase 1 / follow-on design and experiment track — not a calibrated threshold in Phase 0.
 
 ---
 
 ## 3. CPU Profile Results
 
-**Hardware:** Intel64 Family 6 Model 158 Stepping 13, 8 logical cores, Windows 11 (10.0.22631)
+**Hardware (experiment 1 / desktop profiling):** Intel64 Family 6 Model 158 Stepping 13, 8 logical cores, Windows 11 (10.0.22631)
 **Model stack:** `yolo26s.pt` + MediaPipe FaceMesh (refine landmarks)
 **Protocol:** Headless, 15s warmup discarded
 
@@ -106,18 +163,29 @@ Experiment 1 was a pilot with a held laptop and a simulated second person on a m
 | **12** | **10.45** | **No** | **40.7** | 64.8 | 461 | 88.8 |
 | **30** | **10.39** | **No** | **39.1** | 56.6 | 461 | 90.2 |
 
-Hard ceiling on this hardware is approximately **10.4 fps** — targets of 12 or 30 produce the same frame rate. Trust 10-minute numbers over 30-second runs; sustained CPU (31.5% at 5fps) is higher than short-run (27.1%).
+Hard ceiling on the desktop hardware is approximately **10.4 fps** — targets of 12 or 30 produce the same frame rate. Trust 10-minute numbers over 30-second runs; sustained CPU (31.5% at 5fps) is higher than short-run (27.1%).
 
-### Recommended FPS
+### Cross-machine FPS observation (open issue)
+
+Desktop sustained profiling reaches ~10 fps and cannot sustain higher targets. Informal laptop runs during teammate calibration observed roughly **~4 fps** sustained — well below the production target of 5 and far from debug/calibration targets of 10. This is a **blocking investigation item**: the team needs to determine why the pipeline cannot reach (or consistently hold) the intended FPS, and why laptop throughput is so much worse than desktop.
+
+Open questions for the FPS investigation:
+
+- Where is time spent (capture, YOLO, MediaPipe, post-process, overlay, I/O)?
+- Is the laptop bottleneck CPU, thermal throttling, camera backend, or resolution/crop?
+- Can a smaller YOLO model, lower input resolution, or frame skipping close the gap while keeping phone recall acceptable?
+- What is a safe global default once laptop numbers are measured with the same headless 10-minute protocol as desktop?
+
+### Recommended FPS (pending FPS investigation)
 
 | Use case | FPS | Rationale |
 |----------|-----|-----------|
-| **Production (exam companion)** | **5** | Sustains target; closest to <30% machine-CPU goal (31.5% sustained — marginal). ~20 frames over a 4s gaze streak is sufficient for duration-based detection. |
-| **Calibration / debug / demo** | **10** | ~9.6fps sustained; denser signal. Use when machine is dedicated. |
-| **Do not use** | ≥12 | Cannot sustain; same ~10.4fps ceiling as 30fps. |
+| **Production (exam companion)** | **5** (provisional) | Sustains on the profiled desktop; closest to <30% machine-CPU goal (31.5% sustained — marginal). Laptop ~4 fps means this default is **not yet globally validated**. |
+| **Calibration / debug / demo** | **10** (desktop only for now) | ~9.6fps sustained on desktop; denser signal. Not attainable on the observed laptop run. |
+| **Do not use** | ≥12 | Cannot sustain on desktop; same ~10.4fps ceiling as 30fps. |
 | **Only if SEB forces it** | 2–3 | Not measured; use only if browser + SEB leave too little headroom at 5fps. |
 
-The <30% machine-CPU target from Issue #10 is **marginally missed** at 5fps (31.5% avg, 54.3% peak). This is documented, not ignored. The margin is small and the 30-second drill-down looks cleaner (27.1%) — the 10-minute number is the one to trust.
+The <30% machine-CPU target from Issue #10 is **marginally missed** at 5fps on desktop (31.5% avg, 54.3% peak). Laptop CPU/FPS under the same protocol is not yet formally documented and must be completed before locking a global default.
 
 ---
 
@@ -160,7 +228,9 @@ Aggregate non-phone FP rate: 9.0% (within target). Excluding the dark water bott
 
 Obvious, sustained phone poses are reliably detected. Brief, edge, and partially-concealed phones are frequently missed at the threshold level alone — this is expected and scoped to Phase 1 temporal logic.
 
-### Gaze (Profile B: gaze_yaw, yaw_only, 5°, 4s)
+### Gaze — desktop Profile B (current runtime) vs laptop Profile C (intended direction)
+
+**Desktop experiment 1 @ Profile B** (`gaze_yaw`, yaw_only, 5°, 4s)
 
 | Scenario | Longest streak | Fires @4s? | Assessment |
 |----------|---------------|------------|------------|
@@ -175,9 +245,11 @@ Obvious, sustained phone poses are reliably detected. Brief, edge, and partially
 | Suspicious phone under desk (medium) | 4.69s | Yes | Detected |
 | Suspicious phone under desk (long) | 1.34s | No | Miss |
 
-Writing and reading paper are clean. Stretch and drink water produce false raw signals — expected; Phase 1 pattern logic should filter these. Under-desk long pose is missed even at 4s Profile B.
+**Laptop experiment 2 @ Profile C** (`gaze_yaw`, yaw_only, 15°, 4s) — see §2 for full table. Natural reading/writing/stretch clean; side phone and other screen detected; under-desk missed by yaw-only.
 
-### Person intrusion (pilot only — not validated)
+Writing and reading paper are clean on both workable profiles when the yaw threshold matches the camera setup. Stretch/drink false positives appear on desktop Profile B and clear on laptop Profile C at 15°.
+
+### Person intrusion (pilot only — superseded as product direction)
 
 | Scenario | Intrusion triggered | Notes |
 |----------|--------------------|----|
@@ -186,7 +258,7 @@ Writing and reading paper are clean. Stretch and drink water produce false raw s
 | Intrusion (person on screen, leaning) | 0% | Incorrect — bbox ~1.6% of frame, below min_secondary_area_pct |
 | Intrusion (person peeking) | 0% | Incorrect — secondary rarely detected |
 
-Pipeline and CSV logging work correctly. Zero FP in controlled conditions is directionally good, but the test never produced a valid positive because the simulated second person was too small to satisfy policy thresholds. **Results are insufficient for go/no-go on intrusion detection — real experiment required.**
+Pipeline and CSV logging work correctly, but results are insufficient for go/no-go on spatial intrusion. **The team is pivoting away from calibrating this path** toward multi-face gaze (see §2 and §6).
 
 ---
 
@@ -195,42 +267,52 @@ Pipeline and CSV logging work correctly. Zero FP in controlled conditions is dir
 ### Phone detection
 - **Dark water bottle fully in frame** is a persistent false positive (mean confidence ~0.85). Partial and drinking poses of the same bottle behave normally.
 - **Brief, edge, and sideways phone appearances** are largely missed by threshold-based detection alone. Temporal logic (flag if phone seen in N of M frames) is the fix — scoped to Phase 1.
-- **Single hardware profile.** All experiments used one desktop PC webcam with head/shoulders framing. Other cameras, laptops, or crops may need separate calibration runs.
+- **Single hardware profile for phone calibration.** Phone experiments used one desktop PC webcam with head/shoulders framing. Other cameras, laptops, or crops may need separate calibration runs.
 
 ### Gaze estimation
-- **Stretch and drink water** produce yaw streaks of 8–12s — longer than the 4s threshold. Phase 1 duration + context logic should allow brief excursions or use secondary signals.
-- **Eye-only cheating** was not reliably captured by the `eye` signal in experiment 1; the head moved enough to register on `head_yaw` first. More `suspicious_eyes_only` captures with deliberate eye isolation are needed.
+- **Thresholds do not transfer across setups.** Desktop Profile B (5°) fires on all natural laptop scenarios; laptop Profile C (15°) is the intended direction but needs a labeled repeat before runtime change.
+- **Stretch and drink water** produce long yaw streaks on desktop Profile B. Laptop Profile C cleared these in experiment 2 — confirm on the repeat.
+- **Eye-only cheating** was not reliably captured by the `eye` signal in experiment 1; Profile D looked stronger on laptop experiment 2 and remains exploratory.
 - **Burst patterns** (multiple short glances in the same direction that never individually reach the duration threshold) are not evaluated. Duration-only is a Phase 0 baseline — burst/repeated-direction pattern logic is a Phase 1 direction.
-- **Under-desk phone** (long duration) is missed at Profile B 4s. The under-desk long capture only produced a 1.34s streak, suggesting the gaze angle is too small when looking down vs. the yaw-only rule.
+- **Under-desk phone** is often missed by yaw-only gaze (desktop long pose; laptop Profile C). Eye/iris and phone-object context are needed.
+- **Experiment 2 label hygiene** — non-canonical scenario names weaken automated backtest writing/reading columns. Future runs must use exact `natural_writing` / `natural_reading_paper` labels.
 
-### Person intrusion
-- Policy is not validated on real data. Experiment 1 used a held laptop and simulated intruder — both invalidate threshold tuning.
-- Adjacent-seat glances (eyes only, no entry into camera frame) are out of scope and will not be detected by spatial intrusion logic.
-- Screen viewing by a neighbor who never appears as a large/overlapping bbox will be missed.
-- Requires a real helper or classroom setting to calibrate properly.
+### Person / multi-person
+- Spatial intrusion policy is not validated on real data and is **no longer the planned product approach**.
+- Adjacent-seat glances and neighbor screen-looking without a large overlapping bbox are exactly the failure mode of spatial intrusion — motivating the multi-face gaze pivot.
+- Multi-face gaze (detect secondary faces looking at the examinee’s screen; attribute flags to student vs third party) is **not yet implemented or calibrated**.
 
-### CPU
-- Only one machine tested (desktop PC, 8 cores). Weaker laptops should be profiled before locking a global FPS default.
-- 5fps at 31.5% sustained average is marginal vs. the <30% target. Peaks reach 54.3%.
-- If SEB + browser on weaker hardware leaves insufficient headroom, the fallback is 2–3fps (not measured) or a smaller YOLO model.
+### CPU / FPS
+- Desktop hard ceiling ~10.4 fps; production 5 fps is only marginally within the <30% CPU target.
+- Laptop informal sustained rate ~4 fps — below the 5 fps production target. Formal headless profiling on laptop hardware is required.
+- Root cause of the FPS ceiling (desktop and especially laptop) is **not yet diagnosed**.
+- If SEB + browser on weaker hardware leaves insufficient headroom, fallback options include 2–3 fps (not measured) or a smaller YOLO model.
 
 ---
 
 ## 6. Go / No-Go Recommendation
 
-**GO — proceed to Phase 1.**
+**GO — proceed to Phase 1**, with explicit follow-ups before locking gaze policy and FPS defaults.
 
-The core detection pipeline is functional and calibrated. Phone and gaze thresholds are validated with real data and recommended values are documented. CPU is viable at 5fps on the test hardware. The main gap — person intrusion — is a known limitation with a clear path forward (real-setup experiment), not a blocker for Phase 1 architecture decisions.
+The core detection pipeline is functional. Phone thresholds are validated on the desktop dataset. Gaze has a clear laptop-driven direction (Profile C / 15° / 4s) that still needs a confirming experiment before runtime defaults change. Spatial person intrusion is being retired as a product path in favor of multi-face gaze. CPU is viable at 5 fps on the profiled desktop but **not yet proven on laptop**, where observed rates are ~4 fps.
 
-**What Phase 1 should address immediately:**
+**What Phase 1 / next Phase 0 follow-ups should address immediately:**
 
-- **Duration-based streak logic** for all signals (phone, gaze, intrusion). Phase 0 emits raw per-frame signals; Phase 1 needs the layer that converts N consecutive frames to a flag.
-- **Pattern detection for burst gaze events** — multiple short glances in a direction that never individually cross the 4s threshold.
-- **Stretch / drink water filtering** — Phase 1 flag logic should allow brief off-gaze excursions or require secondary context before promoting a raw gaze signal to a professor-facing flag.
-- **Real person intrusion experiment** — fixed laptop on desk, real helper or classroom, run `--summarize` and `--backtest`, then update `DEFAULT_INTRUSION_POLICY` if defaults change.
-- **CPU validation on weaker hardware** — re-run `--mode both --duration 600` on a laptop before locking 5fps as a global default.
+1. **Gaze policy confirmation (before changing runtime defaults)**  
+   Repeat the laptop experiment with exact scenario labels (`natural_writing`, `natural_reading_paper`, sustained ~15s suspicious anchors, plus repeated short side glances). Re-summarize Profile C (`gaze_yaw`, 15°, 4s/6s) and keep Profile D (`eye`) as exploratory. Only then update the runtime attention policy toward Profile C sensitive (4s).
+
+2. **Duration-based streak logic** for all signals (phone, gaze, and future multi-face gaze). Phase 0 emits raw per-frame signals; Phase 1 needs the layer that converts N consecutive frames to a flag.
+
+3. **Pattern detection for burst gaze events** — multiple short glances in a direction that never individually cross the duration threshold.
+
+4. **Stretch / drink water filtering** — Phase 1 flag logic should allow brief off-gaze excursions or require secondary context before promoting a raw gaze signal to a professor-facing flag (especially if desktop-like 5° settings remain in any profile).
+
+5. **Retire spatial person intrusion; design multi-face gaze** — stop investing in YOLO spatial intrusion calibration. Instead, detect multiple faces and estimate whether secondary faces are looking at the examinee’s screen, with flag attribution for the seated student vs. third-party/behind-camera cheating visible in frame.
+
+6. **FPS / performance investigation** — diagnose why the pipeline cannot reach higher targets on desktop (~10 fps ceiling) and why laptop sustained rates are ~4 fps. Re-run formal `--mode both --duration 600` profiling on laptop hardware; identify bottlenecks and evaluate YOLO size / resolution / skip strategies before locking a global FPS default.
 
 **What is NOT blocking Phase 1:**
 - Dark water bottle FP — known, documented, not typical exam behavior.
 - Brief phone detections — temporal logic is the fix, and that's a Phase 1 build.
-- Under-desk long gaze miss — the scenario is narrow; other signals (phone detection, shorter streaks) will fire first in most real cases.
+- Under-desk long gaze miss on yaw-only — narrow scenario; phone detection and eye/iris context are the complementary signals.
+- Spatial intrusion not calibrated — superseded by the multi-face gaze direction rather than treated as a Phase 0 blocker.
