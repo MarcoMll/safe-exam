@@ -313,3 +313,165 @@ Then:
 3. State which profile you recommend and why.
 4. Only update the runtime attention policy after backtest and summarize agree.
 
+---
+
+## Experiment 2 - laptop camera
+
+| Field | Value |
+| ----- | ----- |
+| Experiment id | `experiment_2_laptop` |
+| Scenarios | 6 x ~45s |
+| Raw CSV | [results/experiment_2_laptop/gaze_calibration.csv](results/experiment_2_laptop/gaze_calibration.csv) |
+| Backtest grid | [results/experiment_2_laptop/backtest_grid.csv](results/experiment_2_laptop/backtest_grid.csv) |
+
+### Why this experiment matters
+
+Experiment 1 was recorded on a desktop PC camera. Experiment 2 repeats the important acceptance behaviors on a laptop camera and shows that gaze thresholds are camera/setup dependent.
+
+The repository default after experiment 1 is:
+
+- combined `gaze_yaw`
+- `yaw_only`
+- yaw threshold `5 deg`
+- pitch effectively disabled (`99 deg`)
+- downstream duration target `4s`
+
+On the laptop run, that `5 deg` yaw threshold is too sensitive: it fires on every natural and suspicious scenario. This means the raw laptop data does **not** simply confirm experiment 1; it shows that laptop placement/posture can shift natural gaze yaw enough to require a stricter threshold.
+
+### Scenario set
+
+| Scenario | Intent |
+| -------- | ------ |
+| `natural_reading_paper_2_laptop` | Natural paper reading / gaze down |
+| `natural_writting` | Natural writing answer behavior (label typo kept as recorded) |
+| `natural_stretch_and_drink_2_laptop` | Natural movement / drink behavior |
+| `suspicious_phone_side_2_laptop` | Phone placed off to the side |
+| `suspicious_other_screen_2_laptop` | Looking at another screen |
+| `suspicious_phone_under_desk_2_laptop` | Looking toward a phone under the desk |
+
+### Current default on experiment 2
+
+`gaze_yaw`, `yaw_only`, yaw `5 deg`, duration `4s`, gap `0.4s`
+
+| Scenario | Longest streak | Fires @4s? | Takeaway |
+| -------- | -------------- | ---------- | -------- |
+| `natural_reading_paper_2_laptop` | 44.94s | Y | False positive |
+| `natural_writting` | 8.28s | Y | False positive |
+| `natural_stretch_and_drink_2_laptop` | 17.49s | Y | False positive |
+| `suspicious_phone_side_2_laptop` | 10.14s | Y | Good |
+| `suspicious_other_screen_2_laptop` | 23.26s | Y | Good |
+| `suspicious_phone_under_desk_2_laptop` | 24.29s | Y | Good |
+
+**Finding:** yaw `5 deg` is not laptop-safe in this setup because all natural scenarios trigger.
+
+### Laptop candidate configs
+
+| | Laptop Profile C - gaze yaw stricter | Laptop Profile D - eye exploratory |
+| --- | --- | --- |
+| **Goal** | Keep same raw signal family as repo default, but reduce laptop false positives | Explore a second signal that separated this laptop data well |
+| **Signal** | `gaze_yaw` | `eye` |
+| **Mode** | `yaw_only` | `both` |
+| **Yaw** | `15 deg` | `3 deg` |
+| **Pitch** | `99 deg` | `10 deg` |
+| **Duration** | `4s` or `6s` | `4s` |
+| **Gap tolerance** | `0.4s` | `0.4s` |
+| **natural_fp** | 0 / 3 | 0 / 3 |
+| **suspicious_tp** | 2 / 3 | 3 / 3 |
+| **writing / reading** | ok / ok | ok / ok |
+
+### Profile C snapshot
+
+`gaze_yaw`, `yaw_only`, yaw `15 deg`, duration `4s`, gap `0.4s`
+
+| Scenario | Longest streak | Fires @4s? | Takeaway |
+| -------- | -------------- | ---------- | -------- |
+| `natural_reading_paper_2_laptop` | 2.51s | n | Good |
+| `natural_writting` | 1.30s | n | Good |
+| `natural_stretch_and_drink_2_laptop` | 2.05s | n | Good |
+| `suspicious_phone_side_2_laptop` | 8.10s | Y | Good |
+| `suspicious_other_screen_2_laptop` | 18.24s | Y | Good |
+| `suspicious_phone_under_desk_2_laptop` | 0.00s | n | Miss for yaw-only gaze |
+
+**Profile C interpretation:** for this laptop, yaw `15 deg` is a cleaner gaze-yaw threshold than yaw `5 deg`. It satisfies the issue acceptance shape for writing and side-phone: writing does not fire, and phone off to the side does fire. It misses the under-desk phone case because that behavior is more downward than sideways; use iris/eye/object context for that case instead of relying only on yaw.
+
+### Profile D snapshot
+
+`eye`, `both`, pitch `10 deg`, yaw `3 deg`, duration `4s`, gap `0.4s`
+
+| Scenario | Longest streak | Fires @4s? | Takeaway |
+| -------- | -------------- | ---------- | -------- |
+| `natural_reading_paper_2_laptop` | 1.40s | n | Good |
+| `natural_writting` | 2.60s | n | Good |
+| `natural_stretch_and_drink_2_laptop` | 2.05s | n | Good |
+| `suspicious_phone_side_2_laptop` | 4.93s | Y | Good, but close to threshold |
+| `suspicious_other_screen_2_laptop` | 7.81s | Y | Good |
+| `suspicious_phone_under_desk_2_laptop` | 4.09s | Y | Good, but close to threshold |
+
+**Profile D interpretation:** eye-based thresholding separated experiment 2 better than gaze-yaw, but this should be treated as exploratory. Experiment 1 found the eye signal weaker/noisier, so do not update the runtime default from one laptop run. Use it as a candidate for the next experiment.
+
+### Backtest caveat
+
+The backtest grid is useful for scanning candidate thresholds, but the special `writing_fires` and `reading_fires` columns require exact labels `natural_writing` and `natural_reading_paper`. Experiment 2 used `natural_writting` and `natural_reading_paper_2_laptop`, so read those columns cautiously. The broader `natural_fp_count` and the manual snapshots above are the safer interpretation for this run.
+
+### Acceptance criteria vs experiment 2
+
+| Issue #13 criterion | Status |
+| ------------------- | ------ |
+| Writing should NOT trigger at recommended threshold | **Met** by laptop Profile C and D |
+| Phone side ~15s should trigger | **Met** by laptop Profile C and D |
+| Document duration + angle thresholds | **This section** documents laptop-specific candidates |
+
+### Experiment 2 conclusion
+
+For this laptop setup, the current repo default (`gaze_yaw`, yaw `5 deg`, duration `4s`) is too sensitive and would create false positives on normal paper reading, writing, and stretch/drink behavior.
+
+Recommended laptop candidate for the gaze-yaw policy: **Profile C** (`gaze_yaw`, `yaw_only`, yaw `15 deg`, duration `4s` or `6s`, gap `0.4s`). Use `4s` for a sensitive raw signal and `6s` for a stricter professor-facing flag candidate.
+
+Keep **Profile D** (`eye`, both axes, pitch `10 deg`, yaw `3 deg`, duration `4s`) as an exploratory follow-up because it caught all suspicious scenarios in this laptop run without natural false positives.
+
+### Next experiment recommendation
+
+Run a repeat laptop experiment before changing runtime defaults. Use exact labels so the backtest's writing/reading columns are meaningful:
+
+```bash
+cd scripts
+python -m experiments.gaze_calibration --experiment experiment_3_laptop_repeat --duration 45
+```
+
+Record these scenarios:
+
+| Scenario | What to do |
+| -------- | ---------- |
+| `natural_reading_paper` | Read paper naturally for ~45s with brief screen glances |
+| `natural_writing` | Write an answer naturally for ~45s |
+| `natural_stretch_drink` | Stretch / drink / shift naturally |
+| `suspicious_phone_side_15s` | One clean sustained side-phone look for ~15s, then return to normal |
+| `suspicious_other_screen_15s` | One clean sustained other-screen look for ~15s, then return to normal |
+| `suspicious_phone_under_desk_15s` | One clean sustained under-desk phone look for ~15s, then return to normal |
+| `suspicious_repeated_side_glances` | 3-5 shorter side glances that do not each last 4s |
+
+Then summarize both candidate configs:
+
+```bash
+# Laptop Profile C candidate
+python -m experiments.gaze_calibration --summarize \
+  ../docs/experiments/gaze-calibration/results/experiment_3_laptop_repeat/gaze_calibration.csv \
+  --mode yaw_only --pitch-threshold 99 --yaw-threshold 15 \
+  --gap-tolerance 0.4 --duration-thresholds 4,6,8,12
+
+# Laptop Profile D exploratory candidate (read the eye rows)
+python -m experiments.gaze_calibration --summarize \
+  ../docs/experiments/gaze-calibration/results/experiment_3_laptop_repeat/gaze_calibration.csv \
+  --mode both --pitch-threshold 10 --yaw-threshold 3 \
+  --gap-tolerance 0.4 --duration-thresholds 4,6,8,12
+```
+
+Success criteria for the repeat:
+
+1. `natural_writing` does not fire at `4s` or `6s`.
+2. `natural_reading_paper` does not fire at `4s` or `6s`.
+3. `suspicious_phone_side_15s` fires at `4s` and preferably `6s`.
+4. `suspicious_other_screen_15s` fires at `4s` and preferably `6s`.
+5. `natural_stretch_drink` stays clean.
+6. Under-desk phone is evaluated separately: yaw-only gaze may miss it, so compare `eye` / `iris` and object-phone context before treating it as a gaze-yaw failure.
+
