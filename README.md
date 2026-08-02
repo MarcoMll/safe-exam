@@ -2,7 +2,7 @@
 
 A modular proctoring layer for [Safe Exam Browser (SEB)](https://safeexambrowser.org/). The system uses webcam-based computer vision to detect suspicious behavior during exams — phone use, gaze off-screen, additional people in frame — and raises **flags with confidence scores** for professor review. It does not automatically remove students from exams.
 
-**Current phase:** Phase 0 — local detection prototype. No SEB integration, server, or recording yet. The goal is to prove that detection runs reliably on student hardware before building infrastructure around it.
+**Current phase:** Phase 1 — client agent scaffolding. Phase 0 detection (`capture/`, `detectors/`, `processor/`) is in place; the headless exam companion under `agent/` is the next build surface for the team.
 
 ## What we're detecting
 
@@ -21,7 +21,10 @@ Detectors plug into a shared capture loop and are merged into a single `process_
 ```
 safe-exam/
 ├── .github/workflows/        # CI (lint + pytest on pull requests)
+├── config/
+│   └── ex.config.yml         # Example client agent config (#33)
 ├── docs/
+│   ├── phase-0-findings.md   # Phase 0 go/no-go consolidation
 │   └── experiments/
 │       ├── phone-calibration/  # Threshold findings + result CSVs (#12)
 │       ├── gaze-calibration/   # Off-screen duration findings (#13)
@@ -71,6 +74,13 @@ safe-exam/
 │   │   ├── session_stats.py  # session counters + summaries
 │   │   ├── runner.py         # live capture loop
 │   │   └── debug_overlay.py  # composite debug view
+│   ├── agent/                # Phase 1 client agent (scaffold — build in #33–#39)
+│   │   ├── __main__.py       # Entry: python -m safe_exam.agent (#39)
+│   │   ├── config.py         # YAML config loader (#33)
+│   │   ├── buffer.py         # Ring buffer (#34)
+│   │   ├── fusion.py         # Signal fusion + FlagEvent (#35)
+│   │   ├── network.py        # Clip staging, metadata stream, upload (#36–#38)
+│   │   └── session.py        # Session lifecycle (#39)
 │   └── utils/                # Shared helpers (logging, paths)
 ├── tests/                    # Unit tests (pytest; also run in CI)
 │   └── test_intrusion_policy.py
@@ -105,7 +115,17 @@ The `processor/` package has a few clear roles:
 
 Detectors **compute** raw signals. The processor **interprets** them via `attention_policy.py` and `intrusion_policy.py`, and **aggregates** them via `session_stats.py`. Calibration experiments under `docs/experiments/` help choose policy values; they do not change detector internals.
 
-Phase 1 will add flag logic (duration streaks, pattern detection, professor-facing flags) on top of this layer — not inside individual detectors.
+Phase 1 adds the headless client agent on top of this layer — flag logic, ring buffer, and networking live in `agent/`, not inside individual detectors. Modules under `agent/` are ownership placeholders until their issues land.
+
+### Client agent (Phase 1)
+
+Planned entry once #39 is implemented:
+
+```bash
+python -m safe_exam.agent
+```
+
+Example deployment settings: [`config/ex.config.yml`](config/ex.config.yml).
 
 ## Setup
 
@@ -313,6 +333,15 @@ git checkout -b feature/name   # use your issue number
 | #13 | `scripts/experiments/gaze_calibration/` + `docs/experiments/gaze-calibration/` | Gaze off-screen duration calibration |
 | #14 | `scripts/experiments/person_intrusion/` + `docs/experiments/person-intrusion/` | Person intrusion policy calibration |
 | #15 | `scripts/experiments/cpu_profile/` + `docs/experiments/cpu-profiling/` | CPU/RAM profiling |
+| #32 | `src/safe_exam/agent/` | Directory structure (scaffold) |
+| #33 | `src/safe_exam/agent/config.py` + `config/ex.config.yml` | YAML config system |
+| #34 | `src/safe_exam/agent/buffer.py` | Ring buffer |
+| #35 | `src/safe_exam/agent/fusion.py` | Signal fusion + `FlagEvent` |
+| #36 | `src/safe_exam/agent/network.py` (+ `buffer.py` extract) | Clip extraction and local storage |
+| #37 | `src/safe_exam/agent/network.py` | Metadata stream |
+| #38 | `src/safe_exam/agent/network.py` | Clip upload |
+| #39 | `src/safe_exam/agent/session.py` + `__main__.py` | Session lifecycle |
+| #40 | `src/safe_exam/utils/logging_utils.py` | Structured session logging |
 
 Put shared helpers (config, logging) in `src/safe_exam/utils/`. Do not push directly to `main`.
 
@@ -328,8 +357,8 @@ When your branch is ready, open a PR to `main` and include:
 
 | Phase | Focus |
 |-------|-------|
-| **Phase 0** (current) | Local detection prototype, threshold tuning, CPU profiling, go/no-go report |
-| **Phase 1** (planned) | SEB integration, flag streaming, server-side recording, professor review UI |
+| **Phase 0** | Local detection prototype, threshold tuning, CPU profiling, go/no-go report |
+| **Phase 1** (current) | Headless client agent: config, fusion, ring buffer, metadata/clip upload, session lifecycle |
 
 See [GitHub Issues](https://github.com/MarcoMll/safe-exam/issues) for the full task breakdown.
 
