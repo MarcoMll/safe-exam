@@ -16,6 +16,7 @@ from safe_exam.agent.config import (
     MultiPersonConfig,
     PhoneConfig,
     _parse_config,
+    build_capture_config,
     load_config,
 )
 
@@ -190,6 +191,16 @@ def test_load_config_parses_yaml_into_typed_config(tmp_path):
     assert isinstance(config.logging.log_dir, Path)
 
 
+def test_example_config_matches_current_schema():
+    project_root = Path(__file__).resolve().parents[1]
+
+    config = load_config(project_root / "config" / "ex.config.yml")
+
+    assert config.sampling_fps == 5.0
+    assert config.detectors.phone.confidence_threshold == 0.50
+    assert config.auth_token == "replace-me"
+
+
 def test_parse_config_reports_missing_nested_field():
     raw = _build_raw_config()
     del raw["detectors"]["phone"]["enabled"]
@@ -229,3 +240,12 @@ def test_parse_config_rejects_clip_window_larger_than_buffer():
 
     with pytest.raises(ConfigError, match="must not exceed ring_buffer_seconds"):
         _parse_config(raw)
+
+
+def test_build_capture_config_uses_sampling_fps():
+    config = _build_config()
+
+    capture = build_capture_config(config, camera_index=1)
+
+    assert capture.target_fps == 5.0
+    assert capture.camera_index == 1

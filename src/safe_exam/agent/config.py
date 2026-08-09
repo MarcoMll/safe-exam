@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from capture.capture_config import CaptureConfig
+from safe_exam.capture.capture_config import CaptureConfig
 
 
 class ConfigError(ValueError):
@@ -210,198 +210,217 @@ def _expect_unit_interval(value, path: str) -> float:
     return number
 
 
-def _parse_config(raw: dict) -> Config:
-    """Validate a raw YAML mapping and build the typed agent config."""
-    raw = _expect_mapping(raw, "Config root")
-    _require_exact_fields(
-        raw,
-        {
-            "server_url",
-            "exam_id",
-            "student_id",
-            "auth_token",
-            "sampling_fps",
-            "ring_buffer_seconds",
-            "clip_before_flag_seconds",
-            "clip_after_flag_seconds",
-            "detectors",
-            "fusion",
-            "logging",
-        },
-    )
+_TOP_LEVEL_FIELDS = {
+    "server_url",
+    "exam_id",
+    "student_id",
+    "auth_token",
+    "sampling_fps",
+    "ring_buffer_seconds",
+    "clip_before_flag_seconds",
+    "clip_after_flag_seconds",
+    "detectors",
+    "fusion",
+    "logging",
+}
 
-    detectors_raw = _expect_mapping(raw["detectors"], "detectors")
-    _require_exact_fields(
-        detectors_raw,
-        {"phone", "gaze", "multi_person"},
-        "detectors",
-    )
+_DETECTOR_FIELDS = {"phone", "gaze", "multi_person"}
+_PHONE_FIELDS = {"enabled", "confidence_threshold"}
+_GAZE_FIELDS = {
+    "enabled",
+    "head_pitch_threshold",
+    "head_yaw_threshold",
+    "eye_pitch_threshold",
+    "eye_yaw_threshold",
+    "duration_threshold_seconds",
+}
+_MULTI_PERSON_FIELDS = {"enabled", "roi_mode"}
+_FUSION_FIELDS = {
+    "phone_weight",
+    "gaze_weight",
+    "extra_person_weight",
+    "multi_signal_bonus",
+    "flag_threshold",
+    "flag_cooldown_seconds",
+}
+_LOGGING_FIELDS = {"level", "log_dir"}
+_ALLOWED_LOGGING_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
-    phone_raw = _expect_mapping(detectors_raw["phone"], "detectors.phone")
-    _require_exact_fields(
-        phone_raw,
-        {"enabled", "confidence_threshold"},
-        "detectors.phone",
-    )
 
-    gaze_raw = _expect_mapping(detectors_raw["gaze"], "detectors.gaze")
-    _require_exact_fields(
-        gaze_raw,
-        {
-            "enabled",
-            "head_pitch_threshold",
-            "head_yaw_threshold",
-            "eye_pitch_threshold",
-            "eye_yaw_threshold",
-            "duration_threshold_seconds",
-        },
-        "detectors.gaze",
-    )
-
-    multi_person_raw = _expect_mapping(
-        detectors_raw["multi_person"],
-        "detectors.multi_person",
-    )
-    _require_exact_fields(
-        multi_person_raw,
-        {"enabled", "roi_mode"},
-        "detectors.multi_person",
-    )
-
-    fusion_raw = _expect_mapping(raw["fusion"], "fusion")
-    _require_exact_fields(
-        fusion_raw,
-        {
-            "phone_weight",
-            "gaze_weight",
-            "extra_person_weight",
-            "multi_signal_bonus",
-            "flag_threshold",
-            "flag_cooldown_seconds",
-        },
-        "fusion",
-    )
-
-    logging_raw = _expect_mapping(raw["logging"], "logging")
-    _require_exact_fields(logging_raw, {"level", "log_dir"}, "logging")
-
-    server_url = _expect_string(raw["server_url"], "server_url")
+def _parse_server_url(value) -> str:
+    """Validate and return the server endpoint."""
+    server_url = _expect_string(value, "server_url")
     parsed_url = urlparse(server_url)
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
         raise ConfigError("server_url must be a valid HTTP or HTTPS URL")
+    return server_url
 
-    sampling_fps = _expect_positive_number(raw["sampling_fps"], "sampling_fps")
+
+def _parse_phone_config(raw) -> PhoneConfig:
+    """Parse phone detector settings."""
+    path = "detectors.phone"
+    raw = _expect_mapping(raw, path)
+    _require_exact_fields(raw, _PHONE_FIELDS, path)
+
+    return PhoneConfig(
+        enabled=_expect_bool(raw["enabled"], f"{path}.enabled"),
+        confidence_threshold=_expect_unit_interval(
+            raw["confidence_threshold"],
+            f"{path}.confidence_threshold",
+        ),
+    )
+
+
+def _parse_gaze_config(raw) -> GazeConfig:
+    """Parse gaze detector settings."""
+    path = "detectors.gaze"
+    raw = _expect_mapping(raw, path)
+    _require_exact_fields(raw, _GAZE_FIELDS, path)
+
+    return GazeConfig(
+        enabled=_expect_bool(raw["enabled"], f"{path}.enabled"),
+        head_pitch_threshold=_expect_non_negative_number(
+            raw["head_pitch_threshold"],
+            f"{path}.head_pitch_threshold",
+        ),
+        head_yaw_threshold=_expect_non_negative_number(
+            raw["head_yaw_threshold"],
+            f"{path}.head_yaw_threshold",
+        ),
+        eye_pitch_threshold=_expect_non_negative_number(
+            raw["eye_pitch_threshold"],
+            f"{path}.eye_pitch_threshold",
+        ),
+        eye_yaw_threshold=_expect_non_negative_number(
+            raw["eye_yaw_threshold"],
+            f"{path}.eye_yaw_threshold",
+        ),
+        duration_threshold_seconds=_expect_non_negative_number(
+            raw["duration_threshold_seconds"],
+            f"{path}.duration_threshold_seconds",
+        ),
+    )
+
+
+def _parse_multi_person_config(raw) -> MultiPersonConfig:
+    """Parse additional-person detector settings."""
+    path = "detectors.multi_person"
+    raw = _expect_mapping(raw, path)
+    _require_exact_fields(raw, _MULTI_PERSON_FIELDS, path)
+
+    return MultiPersonConfig(
+        enabled=_expect_bool(raw["enabled"], f"{path}.enabled"),
+        roi_mode=_expect_string(raw["roi_mode"], f"{path}.roi_mode"),
+    )
+
+
+def _parse_detector_config(raw) -> DetectorConfig:
+    """Parse all detector-specific settings."""
+    path = "detectors"
+    raw = _expect_mapping(raw, path)
+    _require_exact_fields(raw, _DETECTOR_FIELDS, path)
+
+    return DetectorConfig(
+        phone=_parse_phone_config(raw["phone"]),
+        gaze=_parse_gaze_config(raw["gaze"]),
+        multi_person=_parse_multi_person_config(raw["multi_person"]),
+    )
+
+
+def _parse_fusion_config(raw) -> FusionConfig:
+    """Parse signal-fusion settings."""
+    path = "fusion"
+    raw = _expect_mapping(raw, path)
+    _require_exact_fields(raw, _FUSION_FIELDS, path)
+
+    return FusionConfig(
+        phone_weight=_expect_unit_interval(
+            raw["phone_weight"],
+            f"{path}.phone_weight",
+        ),
+        gaze_weight=_expect_unit_interval(
+            raw["gaze_weight"],
+            f"{path}.gaze_weight",
+        ),
+        extra_person_weight=_expect_unit_interval(
+            raw["extra_person_weight"],
+            f"{path}.extra_person_weight",
+        ),
+        multi_signal_bonus=_expect_unit_interval(
+            raw["multi_signal_bonus"],
+            f"{path}.multi_signal_bonus",
+        ),
+        flag_threshold=_expect_unit_interval(
+            raw["flag_threshold"],
+            f"{path}.flag_threshold",
+        ),
+        flag_cooldown_seconds=_expect_non_negative_number(
+            raw["flag_cooldown_seconds"],
+            f"{path}.flag_cooldown_seconds",
+        ),
+    )
+
+
+def _parse_logging_config(raw) -> LoggingConfig:
+    """Parse logging settings."""
+    path = "logging"
+    raw = _expect_mapping(raw, path)
+    _require_exact_fields(raw, _LOGGING_FIELDS, path)
+
+    level = _expect_string(raw["level"], f"{path}.level").upper()
+    if level not in _ALLOWED_LOGGING_LEVELS:
+        allowed = ", ".join(sorted(_ALLOWED_LOGGING_LEVELS))
+        raise ConfigError(f"{path}.level must be one of: {allowed}")
+
+    return LoggingConfig(
+        level=level,
+        log_dir=Path(_expect_string(raw["log_dir"], f"{path}.log_dir")),
+    )
+
+
+def _parse_clip_settings(raw: dict) -> tuple[float, float, float]:
+    """Parse ring-buffer and clip-window durations."""
     ring_buffer_seconds = _expect_positive_number(
         raw["ring_buffer_seconds"],
         "ring_buffer_seconds",
     )
-    clip_before_flag_seconds = _expect_non_negative_number(
+    clip_before = _expect_non_negative_number(
         raw["clip_before_flag_seconds"],
         "clip_before_flag_seconds",
     )
-    clip_after_flag_seconds = _expect_non_negative_number(
+    clip_after = _expect_non_negative_number(
         raw["clip_after_flag_seconds"],
         "clip_after_flag_seconds",
     )
-    if clip_before_flag_seconds + clip_after_flag_seconds > ring_buffer_seconds:
+
+    if clip_before + clip_after > ring_buffer_seconds:
         raise ConfigError(
             "clip_before_flag_seconds + clip_after_flag_seconds "
             "must not exceed ring_buffer_seconds"
         )
 
-    logging_level = _expect_string(logging_raw["level"], "logging.level").upper()
-    allowed_logging_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
-    if logging_level not in allowed_logging_levels:
-        allowed = ", ".join(sorted(allowed_logging_levels))
-        raise ConfigError(f"logging.level must be one of: {allowed}")
+    return ring_buffer_seconds, clip_before, clip_after
+
+
+def _parse_config(raw: dict) -> Config:
+    """Validate a raw YAML mapping and build the typed agent config."""
+    raw = _expect_mapping(raw, "Config root")
+    _require_exact_fields(raw, _TOP_LEVEL_FIELDS)
+
+    ring_buffer_seconds, clip_before, clip_after = _parse_clip_settings(raw)
 
     return Config(
-        server_url=server_url,
+        server_url=_parse_server_url(raw["server_url"]),
         exam_id=_expect_string(raw["exam_id"], "exam_id"),
         student_id=_expect_string(raw["student_id"], "student_id"),
         auth_token=_expect_string(raw["auth_token"], "auth_token"),
-        sampling_fps=sampling_fps,
+        sampling_fps=_expect_positive_number(raw["sampling_fps"], "sampling_fps"),
         ring_buffer_seconds=ring_buffer_seconds,
-        clip_before_flag_seconds=clip_before_flag_seconds,
-        clip_after_flag_seconds=clip_after_flag_seconds,
-        detectors=DetectorConfig(
-            phone=PhoneConfig(
-                enabled=_expect_bool(
-                    phone_raw["enabled"],
-                    "detectors.phone.enabled",
-                ),
-                confidence_threshold=_expect_unit_interval(
-                    phone_raw["confidence_threshold"],
-                    "detectors.phone.confidence_threshold",
-                ),
-            ),
-            gaze=GazeConfig(
-                enabled=_expect_bool(
-                    gaze_raw["enabled"],
-                    "detectors.gaze.enabled",
-                ),
-                head_pitch_threshold=_expect_non_negative_number(
-                    gaze_raw["head_pitch_threshold"],
-                    "detectors.gaze.head_pitch_threshold",
-                ),
-                head_yaw_threshold=_expect_non_negative_number(
-                    gaze_raw["head_yaw_threshold"],
-                    "detectors.gaze.head_yaw_threshold",
-                ),
-                eye_pitch_threshold=_expect_non_negative_number(
-                    gaze_raw["eye_pitch_threshold"],
-                    "detectors.gaze.eye_pitch_threshold",
-                ),
-                eye_yaw_threshold=_expect_non_negative_number(
-                    gaze_raw["eye_yaw_threshold"],
-                    "detectors.gaze.eye_yaw_threshold",
-                ),
-                duration_threshold_seconds=_expect_non_negative_number(
-                    gaze_raw["duration_threshold_seconds"],
-                    "detectors.gaze.duration_threshold_seconds",
-                ),
-            ),
-            multi_person=MultiPersonConfig(
-                enabled=_expect_bool(
-                    multi_person_raw["enabled"],
-                    "detectors.multi_person.enabled",
-                ),
-                roi_mode=_expect_string(
-                    multi_person_raw["roi_mode"],
-                    "detectors.multi_person.roi_mode",
-                ),
-            ),
-        ),
-        fusion=FusionConfig(
-            phone_weight=_expect_unit_interval(
-                fusion_raw["phone_weight"],
-                "fusion.phone_weight",
-            ),
-            gaze_weight=_expect_unit_interval(
-                fusion_raw["gaze_weight"],
-                "fusion.gaze_weight",
-            ),
-            extra_person_weight=_expect_unit_interval(
-                fusion_raw["extra_person_weight"],
-                "fusion.extra_person_weight",
-            ),
-            multi_signal_bonus=_expect_unit_interval(
-                fusion_raw["multi_signal_bonus"],
-                "fusion.multi_signal_bonus",
-            ),
-            flag_threshold=_expect_unit_interval(
-                fusion_raw["flag_threshold"],
-                "fusion.flag_threshold",
-            ),
-            flag_cooldown_seconds=_expect_non_negative_number(
-                fusion_raw["flag_cooldown_seconds"],
-                "fusion.flag_cooldown_seconds",
-            ),
-        ),
-        logging=LoggingConfig(
-            level=logging_level,
-            log_dir=Path(_expect_string(logging_raw["log_dir"], "logging.log_dir")),
-        ),
+        clip_before_flag_seconds=clip_before,
+        clip_after_flag_seconds=clip_after,
+        detectors=_parse_detector_config(raw["detectors"]),
+        fusion=_parse_fusion_config(raw["fusion"]),
+        logging=_parse_logging_config(raw["logging"]),
     )
 
 
@@ -409,6 +428,7 @@ def load_config(path: str | Path) -> Config:
     """Load, validate, and convert YAML into typed agent settings."""
     raw = _load_yaml(path)
     return _parse_config(raw)
+
 
 def build_capture_config(
     config: Config,

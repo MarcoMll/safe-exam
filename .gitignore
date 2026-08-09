@@ -4,6 +4,8 @@ venv/
 
 # Environment and secrets
 .env
+config/*.yml
+!config/ex.config.yml
 
 # Python
 __pycache__/

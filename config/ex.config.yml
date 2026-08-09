@@ -1,0 +1,40 @@
+# Example client configuration.
+
+server_url: "https://examguard.school.edu/"
+exam_id: "EXAM_2026_FINAL"
+student_id: "S12345"
+auth_token: "replace-me"
+
+sampling_fps: 5
+ring_buffer_seconds: 60
+clip_before_flag_seconds: 15
+clip_after_flag_seconds: 5
+
+detectors:
+  phone:
+    enabled: true
+    confidence_threshold: 0.50
+
+  gaze:
+    enabled: true
+    head_pitch_threshold: 20
+    head_yaw_threshold: 25
+    eye_pitch_threshold: 15
+    eye_yaw_threshold: 20
+    duration_threshold_seconds: 4
+
+  multi_person:
+    enabled: true
+    roi_mode: "proximity"
+
+fusion:
+  phone_weight: 0.5
+  gaze_weight: 0.3
+  extra_person_weight: 0.4
+  multi_signal_bonus: 0.3
+  flag_threshold: 0.5
+  flag_cooldown_seconds: 30
+
+logging:
+  level: "INFO"
+  log_dir: "./logs"

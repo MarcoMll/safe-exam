@@ -117,6 +117,18 @@ Detectors **compute** raw signals. The processor **interprets** them via `attent
 
 Phase 1 adds the headless client agent on top of this layer — flag logic, ring buffer, and networking live in `agent/`, not inside individual detectors. Modules under `agent/` are ownership placeholders until their issues land.
 
+### Client configuration
+
+Copy the example configuration:
+
+cp config/ex.config.yml config/config.yml
+
+Update deployment values, then load it with:
+
+from safe_exam.agent.config import load_config
+
+config = load_config("config/config.yml")
+
 ### Client agent (Phase 1)
 
 Planned entry once #39 is implemented:
