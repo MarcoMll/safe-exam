@@ -2,6 +2,7 @@
 
 from collections import deque
 from math import ceil
+from threading import Lock
 
 import numpy as np
 
@@ -28,18 +29,32 @@ class RingBuffer:
         self._clip_before_flag_seconds = clip_before_flag_seconds
         self._clip_after_flag_seconds = clip_after_flag_seconds
 
+        self._lock = Lock()
         self._max_frames = ceil(ring_buffer_seconds * sampling_fps)
         self._frames: deque[FrameEntry] = deque(maxlen=self._max_frames)
 
     def add_frame(self, timestamp: float, frame: np.ndarray) -> None:
         """Add one timestamped frame to the buffer."""
-        self._frames.append((timestamp, frame))
+        with self._lock:
+            self._frames.append((timestamp, frame))
 
     def snapshot(self) -> tuple[FrameEntry, ...]:
         """Return the stored entries in chronological insertion order."""
-        return tuple(self._frames)
+        with self._lock:
+            return tuple(self._frames)
 
-    # created this one as a helper method for testing
+    def extract_clip(self, flag_timestamp: float) -> list[FrameEntry]:
+        """Return frames inside the configured window around a flag."""
+        window_start = flag_timestamp - self._clip_before_flag_seconds
+        window_end = flag_timestamp + self._clip_after_flag_seconds
+
+        return [
+            (timestamp, frame)
+            for timestamp, frame in self.snapshot()
+            if window_start <= timestamp <= window_end
+        ]
+
     def __len__(self) -> int:
         """Return the current number of stored frames."""
-        return len(self._frames)
+        with self._lock:
+            return len(self._frames)
