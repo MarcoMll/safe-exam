@@ -51,7 +51,7 @@ class SignalFuser:
         self.eye_policy = eye_policy
 
     @classmethod
-    def from_config(cls, full_config: Config) -> SignalFuser:
+    def from_config(cls: type[SignalFuser], full_config: Config) -> SignalFuser:
         """Creates a `SignalFuser` instance from the global configuration."""
         head_policy = AttentionPolicyConfig(
             signal="head",
@@ -127,7 +127,7 @@ class SignalFuser:
             score += self.fusion_config.extra_person_weight
             reasons.append("multiple_person")
 
-        if len(reasons) >= 2:
+        if len(reasons) > 1:
             score += self.fusion_config.multi_signal_bonus
 
         return min(score, 1.0), reasons
