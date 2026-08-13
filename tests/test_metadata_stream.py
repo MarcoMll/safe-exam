@@ -1,4 +1,6 @@
 """Tests for lightweight metadata stream buffering."""
+import time
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -56,7 +58,7 @@ def test_record_frame_buffers_signal_when_recording():
         person_count=2,
     )
 
-    stream.start()
+    stream.start_recording()
     stream.record_frame(
         _output(frame_result),
         gaze_off_seconds=1.25,
@@ -76,6 +78,8 @@ def test_record_frame_buffers_signal_when_recording():
     assert signals[0]["fused_score"] == 0.75
     assert stream._drain_signals() == ()
 
+    stream.stop_recording()
+
 
 def test_record_frame_ignores_frames_when_not_recording():
     stream = MetadataStreamThread(
@@ -91,3 +95,148 @@ def test_record_frame_ignores_frames_when_not_recording():
     )
 
     assert stream._drain_signals() == ()
+
+def test_start_recording_starts_background_thread():
+    stream = MetadataStreamThread(
+        server_url="http://localhost:8000",
+        session_id="test-session",
+        auth_token="test-token",
+        interval_seconds=1.0,
+    )
+
+    stream.start_recording()
+
+    assert stream.recording is True
+    assert stream._thread is not None
+    assert stream._thread.is_alive()
+
+    stream.stop_recording()
+
+def test_interval_creates_pending_packet():
+    stream = MetadataStreamThread(
+        server_url="https://idinahui.pidor/spencer-dolbaeb",
+        session_id="test-session",
+        auth_token="test-token",
+        interval_seconds=0.1,
+    )
+
+    mock_output = MagicMock(spec=ProcessFrameOutput)
+    mock_output.as_dict.return_value = {"frame_id": 1}
+    mock_output.result = MagicMock(spec=FrameResult)
+    mock_output.result.person_count = 1
+
+    stream.start_recording()
+    stream.record_frame(
+        output=mock_output,
+        gaze_off_seconds=0.5,
+        fused_score=0.8,
+    )
+
+    time.sleep(1)
+
+    packets = stream.get_pending_packets()
+    stream.stop_recording()
+
+    assert len(packets) == 1
+
+    packet = packets[0]
+
+    assert packet["session_id"] == "test-session"
+    assert isinstance(packet["timestamp"], float)
+    assert len(packet["signals"]) == 1
+
+    signal = packet["signals"][0]
+
+    assert signal["frame_id"] == 1
+    assert signal["extra_person_detected"] is False
+    assert signal["gaze_off_seconds"] == 0.5
+    assert signal["fused_score"] == 0.8
+
+def test_stop_recording_loses_partial_packet():
+    stream = MetadataStreamThread(
+        server_url="https://idinahui.pidor/spencer-dolbaeb",
+        session_id="test-session",
+        auth_token="test-token",
+        interval_seconds=10,
+    )
+
+    mock_output = MagicMock(spec=ProcessFrameOutput)
+    mock_output.as_dict.return_value = {"frame_id": 1}
+    mock_output.result = MagicMock(spec=FrameResult)
+    mock_output.result.person_count = 1
+
+    stream.start_recording()
+    stream.record_frame(
+        output=mock_output,
+        gaze_off_seconds=0.5,
+        fused_score=0.8,
+    )
+
+    time.sleep(1)
+
+    stream.stop_recording()
+
+    packets = stream.get_pending_packets()
+
+    assert len(packets) == 1
+    assert len(packets[0]["signals"]) == 1
+
+    assert stream._thread is not None
+    assert not stream._thread.is_alive()
+
+def test_repeated_start_does_not_create_another_thread():
+    stream = MetadataStreamThread(
+        server_url="http://localhost:8000",
+        session_id="test-session",
+        auth_token="test-token",
+        interval_seconds=1.0,
+    )
+
+    stream.start_recording()
+    first_thread = stream._thread
+
+    stream.start_recording()
+
+    assert stream._thread is first_thread
+
+    stream.stop_recording()
+
+def test_repeated_stop_does_not_fail():
+    stream = MetadataStreamThread(
+        server_url="http://localhost:8000",
+        session_id="test-session",
+        auth_token="test-token",
+        interval_seconds=1.0,
+    )
+
+    stream.start_recording()
+
+    stream.stop_recording()
+    stream.stop_recording()
+
+    assert stream.recording is False
+    assert stream._thread is not None
+    assert not stream._thread.is_alive()
+
+def test_can_start_again_after_stop():
+    stream = MetadataStreamThread(
+        server_url="http://localhost:8000",
+        session_id="test-session",
+        auth_token="test-token",
+        interval_seconds=1.0,
+    )
+
+    stream.start_recording()
+    first_thread = stream._thread
+
+    stream.stop_recording()
+
+    stream.start_recording()
+    second_thread = stream._thread
+
+    assert stream.recording is True
+    assert second_thread is not None
+    assert second_thread.is_alive()
+    assert second_thread is not first_thread
+
+    stream.stop_recording()

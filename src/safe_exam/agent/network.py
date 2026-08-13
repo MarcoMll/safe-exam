@@ -1,6 +1,7 @@
 """Clip staging, metadata stream, and clip upload. Owned by #36–#38."""
-
-from threading import Lock, Thread
+import time
+from queue import Empty, Queue
+from threading import Event, Lock, Thread
 from urllib.parse import urljoin
 
 from safe_exam.processor.frame_result import ProcessFrameOutput
@@ -29,26 +30,36 @@ class MetadataStreamThread:
         self.auth_token = auth_token
         self.interval_seconds = float(interval_seconds)
 
-        self._signals: list[dict] = []
         self._lock = Lock()
+        self._signals: list[dict] = []
+        self._pending_packets: Queue[dict] = Queue()
 
         self._thread: Thread | None = None
-
-    def start(self) -> None:
-        """Allow the main loop to begin recording metadata entries."""
-        self.recording = True
-
-    def stop(self) -> None:
-        """Stop accepting new metadata entries."""
-        self.recording = False
+        self._stop_event = Event()
 
     def start_recording(self) -> None:
-        """Compatibility alias while the session lifecycle is still taking shape."""
-        self.start()
+        if self.recording:
+            return
+
+        self._stop_event.clear()
+
+        self.recording = True
+        self._thread = Thread(target=self._run)
+
+        if self._thread is not None:
+            self._thread.start()
 
     def stop_recording(self) -> None:
-        """Compatibility alias while the session lifecycle is still taking shape."""
-        self.stop()
+        with self._lock:
+            if not self.recording:
+                return
+
+            self.recording = False
+
+        self._stop_event.set()
+
+        if self._thread is not None:
+            self._thread.join()
 
     def record_frame(
         self,
@@ -59,13 +70,7 @@ class MetadataStreamThread:
     ) -> None:
         """
         Copy one processed frame into the metadata buffer.
-
-        This method stays intentionally cheap: no HTTP, no disk writes, just a
-        small dictionary append protected by a lock.
         """
-        if not self.recording:
-            return
-
         signal = self._build_signal(
             output,
             gaze_off_seconds=gaze_off_seconds,
@@ -73,6 +78,9 @@ class MetadataStreamThread:
         )
 
         with self._lock:
+            if not self.recording:
+                return
+
             self._signals.append(signal)
 
     def _drain_signals(self) -> tuple[dict, ...]:
@@ -82,6 +90,30 @@ class MetadataStreamThread:
             self._signals.clear()
 
         return signals
+
+    def _create_package(self, signals: tuple[dict, ...]) -> dict:
+        return  {
+            "session_id": self.session_id,
+            "timestamp": time.time(),
+            "signals": list(signals),
+        }
+
+    def _flush_signals(self) -> None:
+        signals = self._drain_signals()
+
+        if len(signals) > 0:
+            package = self._create_package(signals)
+            self._pending_packets.put(package)
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            stop_requested = self._stop_event.wait(self.interval_seconds)
+
+            if stop_requested:
+                self._flush_signals()
+                return
+
+            self._flush_signals()
 
     @staticmethod
     def _build_signal(
@@ -97,3 +129,14 @@ class MetadataStreamThread:
         signal["fused_score"] = float(fused_score)
 
         return signal
+
+    def get_pending_packets(self) -> list[dict]:
+        packets = []
+
+        while True:
+            try:
+                packets.append(self._pending_packets.get_nowait())
+            except Empty:
+                break
+
+        return packets
