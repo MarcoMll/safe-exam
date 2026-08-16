@@ -1,20 +1,28 @@
 """Clip staging, metadata stream, and clip upload. Owned by #36–#38."""
 
+from __future__ import annotations
+
 import json
 import subprocess
 from pathlib import Path
 from threading import Lock, Thread
 from urllib.parse import urljoin
 
+import cv2  # pylint: disable=no-member
 import imageio_ffmpeg
 import numpy as np
 
 from safe_exam.agent.buffer import FrameEntry
 from safe_exam.agent.config import Config
 from safe_exam.agent.fusion import FlagEvent
-from safe_exam.processor.frame_result import ProcessFrameOutput
+from safe_exam.processor.frame_result import FrameResult, ProcessFrameOutput
 
 METADATA_INGEST_PATH = "metadata/ingest"
+DEFAULT_CLIP_DIR = Path("data/staged_clips")
+QUEUE_FILENAME = "upload_queue.jsonl"
+DEFAULT_CLIP_BITRATE = "500k"
+
+_queue_lock = Lock()
 
 
 class MetadataStreamThread:
@@ -109,39 +117,52 @@ class MetadataStreamThread:
 
 
 def _load_upload_queue(queue_path: Path) -> list[dict[str, str]]:
-    """Load the upload queue from disk, or return an empty list if it doesn't exist."""
-    if not queue_path.exists():
+    """Load the jsonl upload queue, or return [] if the file is missing."""
+    if not queue_path.is_file():
         return []
 
-    with queue_path.open("r", encoding="utf-8") as queue_file:
-        try:
-            return json.load(queue_file)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Upload queue is not valid JSON: {queue_path}") from exc
-
-
-# I think the Queue path could be added to a config
-def _save_upload_queue(queue_path: Path, queue: list[dict[str, str]]) -> None:
-    """Write clip metadata alongside the staged MP4."""
-    queue_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with queue_path.open("w", encoding="utf-8") as queue_file:
-        json.dump(queue, queue_file, indent=2)
+    entries: list[dict[str, str]] = []
+    with queue_path.open(encoding="utf-8") as queue_file:
+        for line_number, line in enumerate(queue_file, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"Upload queue line {line_number} is not valid JSON: {queue_path}"
+                ) from exc
+            if not isinstance(entry, dict):
+                raise ValueError(
+                    f"Upload queue line {line_number} must be a JSON object: "
+                    f"{queue_path}"
+                )
+            entries.append(entry)
+    return entries
 
 
 def _add_to_upload_queue(
     queue_path: Path, *, clip_path: Path, sidecar_path: Path
 ) -> None:
-    """Add a new clip to the upload queue."""
-    queue = _load_upload_queue(queue_path)
-
+    """Append one clip/sidecar pair to the persistent jsonl upload queue."""
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
-        "clip_path": str(clip_path),
-        "sidecar_path": str(sidecar_path),
+        "clip_path": str(clip_path.resolve()),
+        "sidecar_path": str(sidecar_path.resolve()),
     }
-    queue.append(entry)
+    line = json.dumps(entry) + "\n"
+    with _queue_lock:
+        with queue_path.open("a", encoding="utf-8") as queue_file:
+            queue_file.write(line)
 
-    _save_upload_queue(queue_path, queue)
+
+def load_pending_uploads(queue_path: Path) -> list[tuple[Path, Path]]:
+    """Return pending (clip, sidecar) paths for #38 / tests."""
+    pending: list[tuple[Path, Path]] = []
+    for entry in _load_upload_queue(queue_path):
+        pending.append((Path(entry["clip_path"]), Path(entry["sidecar_path"])))
+    return pending
 
 
 def _write_clip_sidecar(
@@ -153,9 +174,7 @@ def _write_clip_sidecar(
     gaze_off_seconds: float,
     extra_person_detected: bool,
 ) -> None:
-    """
-    Write clip metadata along side the staged MP4
-    """
+    """Write clip metadata alongside the staged MP4."""
     sidecar_path.parent.mkdir(parents=True, exist_ok=True)
 
     sidecar_data = {
@@ -166,10 +185,13 @@ def _write_clip_sidecar(
         "gaze_off_seconds": float(gaze_off_seconds),
         "extra_person_detected": bool(extra_person_detected),
         "fused_score": float(flag.score),
+        "reasons": list(flag.reasons),
     }
 
-    with sidecar_path.open("w", encoding="utf-8") as sidecar_file:
-        json.dump(sidecar_data, sidecar_file, indent=2)
+    sidecar_path.write_text(
+        json.dumps(sidecar_data, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _encode_frames_to_mp4(
@@ -179,9 +201,7 @@ def _encode_frames_to_mp4(
     fps: float,
     bitrate: str,
 ) -> None:
-    """
-    Encode BGR frames to an H.264 MP4 file
-    """
+    """Encode BGR frames to an H.264 MP4 via ffmpeg (imageio-ffmpeg)."""
     if not frames:
         raise ValueError("No frames to encode")
 
@@ -197,6 +217,12 @@ def _encode_frames_to_mp4(
         raise ValueError("Frames must use uint8 pixel values")
 
     height, width = first_frame.shape[:2]
+    # libx264 + yuv420p typically requires even dimensions.
+    out_w = width - (width % 2)
+    out_h = height - (height % 2)
+    if out_w < 2 or out_h < 2:
+        raise ValueError("Frame size is too small to encode")
+
     clip_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -216,7 +242,7 @@ def _encode_frames_to_mp4(
         "-pix_fmt",
         "bgr24",
         "-s",
-        f"{width}x{height}",
+        f"{out_w}x{out_h}",
         "-r",
         str(fps),
         "-i",
@@ -246,20 +272,17 @@ def _encode_frames_to_mp4(
     assert process.stdin is not None
     assert process.stderr is not None
 
+    return_code = -1
+    stderr = ""
     try:
         for _, frame in frames:
-
-            if frame.shape[:2] != (height, width):
-                raise ValueError(
-                    f"Frame dimensions {frame.shape[:2]} do not match expected "
-                    f"dimensions {(height, width)}"
-                )
-
             if frame.ndim != 3 or frame.shape[2] != 3:
                 raise ValueError("Frames must be BGR images with 3 channels")
-
             if frame.dtype != np.uint8:
                 raise ValueError("Frames must use uint8 pixel values")
+
+            if frame.shape[0] != out_h or frame.shape[1] != out_w:
+                frame = cv2.resize(frame, (out_w, out_h))
 
             frame = np.ascontiguousarray(frame)
             process.stdin.write(frame.tobytes())
@@ -267,7 +290,6 @@ def _encode_frames_to_mp4(
         process.stdin.close()
         stderr = process.stderr.read().decode("utf-8", errors="replace")
         return_code = process.wait()
-
     finally:
         if process.poll() is None:
             process.kill()
@@ -281,20 +303,29 @@ def stage_clip(
     *,
     flag: FlagEvent,
     config: Config,
-    phone_confidence: float,
-    gaze_off_seconds: float,
-    extra_person_detected: bool,
-    # Bitrate should be moved to the config
-    clip_bitrate: str = "500k",
-    clip_dir: Path = Path("data/staged_clips"),
+    phone_confidence: float = 0.0,
+    gaze_off_seconds: float = 0.0,
+    extra_person_detected: bool = False,
+    frame_result: FrameResult | None = None,
+    clip_bitrate: str | None = None,
+    clip_dir: Path | None = None,
 ) -> tuple[Path, Path]:
     """
-    Encode extracted frames to MP4, write a JSON sidecar, and persist the upload queue.
+    Encode extracted frames to H.264 MP4, write a JSON sidecar, enqueue for upload.
+
+    When ``frame_result`` is set, ``phone_confidence`` and ``extra_person_detected``
+    are taken from that result. Bitrate and directory default from ``config``
+    (``clip_bitrate``, ``clip_dir``) unless overridden.
 
     Returns:
         (clip_path, sidecar_path)
     """
-    stage_dir = clip_dir
+    if frame_result is not None:
+        phone_confidence = float(frame_result.phone_confidence)
+        extra_person_detected = frame_result.person_count > 1
+
+    resolved_bitrate = clip_bitrate or config.clip_bitrate
+    stage_dir = clip_dir or config.clip_dir
     stage_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp_unix = int(flag.timestamp)
@@ -302,13 +333,13 @@ def stage_clip(
 
     clip_path = stage_dir / f"{filename_base}.mp4"
     sidecar_path = stage_dir / f"{filename_base}.json"
-    queue_path = stage_dir / "upload_queue.json"
+    queue_path = stage_dir / QUEUE_FILENAME
 
     _encode_frames_to_mp4(
         frames,
         clip_path=clip_path,
         fps=config.sampling_fps,
-        bitrate=clip_bitrate,
+        bitrate=resolved_bitrate,
     )
 
     _write_clip_sidecar(
