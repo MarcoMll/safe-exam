@@ -112,6 +112,10 @@ class Config:
     clip_before_flag_seconds: float
     # Video duration saved after a flag is raised.
     clip_after_flag_seconds: float
+    # Target video bitrate for staged clips (ffmpeg -b:v), e.g. "500k".
+    clip_bitrate: str
+    # Directory where staged MP4s, sidecars, and the upload queue are stored.
+    clip_dir: Path
 
     # Settings for all detectors.
     detectors: DetectorConfig
@@ -219,6 +223,8 @@ _TOP_LEVEL_FIELDS = {
     "ring_buffer_seconds",
     "clip_before_flag_seconds",
     "clip_after_flag_seconds",
+    "clip_bitrate",
+    "clip_dir",
     "detectors",
     "fusion",
     "logging",
@@ -418,6 +424,8 @@ def _parse_config(raw: dict) -> Config:
         ring_buffer_seconds=ring_buffer_seconds,
         clip_before_flag_seconds=clip_before,
         clip_after_flag_seconds=clip_after,
+        clip_bitrate=_expect_string(raw["clip_bitrate"], "clip_bitrate"),
+        clip_dir=Path(_expect_string(raw["clip_dir"], "clip_dir")),
         detectors=_parse_detector_config(raw["detectors"]),
         fusion=_parse_fusion_config(raw["fusion"]),
         logging=_parse_logging_config(raw["logging"]),

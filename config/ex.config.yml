@@ -9,6 +9,8 @@ sampling_fps: 5
 ring_buffer_seconds: 60
 clip_before_flag_seconds: 15
 clip_after_flag_seconds: 5
+clip_bitrate: "500k"
+clip_dir: "data/staged_clips"
 
 detectors:
   phone:
