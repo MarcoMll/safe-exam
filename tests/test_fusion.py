@@ -26,6 +26,8 @@ def fuser():
         ring_buffer_seconds=30.0,
         clip_before_flag_seconds=5.0,
         clip_after_flag_seconds=5.0,
+        clip_bitrate="500k",
+        clip_dir=Path("data/staged_clips"),
         detectors=DetectorConfig(
             phone=PhoneConfig(enabled=True, confidence_threshold=0.8),
             gaze=GazeConfig(

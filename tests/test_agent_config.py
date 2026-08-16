@@ -32,6 +32,8 @@ def _build_config() -> Config:
         ring_buffer_seconds=60.0,
         clip_before_flag_seconds=15.0,
         clip_after_flag_seconds=5.0,
+        clip_bitrate="500k",
+        clip_dir=Path("data/staged_clips"),
         detectors=DetectorConfig(
             phone=PhoneConfig(
                 enabled=True,
@@ -76,6 +78,8 @@ def _build_raw_config() -> dict:
         "ring_buffer_seconds": 60.0,
         "clip_before_flag_seconds": 15.0,
         "clip_after_flag_seconds": 5.0,
+        "clip_bitrate": "500k",
+        "clip_dir": "data/staged_clips",
         "detectors": {
             "phone": {
                 "enabled": True,
@@ -120,6 +124,8 @@ def test_config_exposes_session_and_capture_settings():
     assert config.ring_buffer_seconds == 60.0
     assert config.clip_before_flag_seconds == 15.0
     assert config.clip_after_flag_seconds == 5.0
+    assert config.clip_bitrate == "500k"
+    assert config.clip_dir == Path("data/staged_clips")
 
 
 def test_config_exposes_nested_detector_settings():
