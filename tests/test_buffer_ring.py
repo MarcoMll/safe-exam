@@ -19,6 +19,7 @@ def _make_buffer(
         clip_after_flag_seconds=clip_after_flag_seconds,
     )
 
+
 def _frame(value: int) -> np.ndarray:
     return np.full((2, 2, 3), value, dtype=np.uint8)
 

@@ -7,6 +7,9 @@ venv/
 config/*.yml
 !config/ex.config.yml
 
+# MP4 files
+data/staged_clips/
+
 # Python
 __pycache__/
 *.pyc
