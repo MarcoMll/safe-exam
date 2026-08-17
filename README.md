@@ -24,6 +24,7 @@ safe-exam/
 ├── config/
 │   └── ex.config.yml         # Example client agent config (#33)
 ├── docs/
+│   ├── api-contract.md       # Agent ↔ server HTTP contract
 │   ├── phase-0-findings.md   # Phase 0 go/no-go consolidation
 │   └── experiments/
 │       ├── phone-calibration/  # Threshold findings + result CSVs (#12)
@@ -31,6 +32,10 @@ safe-exam/
 │       ├── person-intrusion/   # Spatial intrusion policy findings (#14)
 │       └── cpu-profiling/      # CPU/RAM profiling findings (#15)
 ├── models/                   # Downloaded model weights (not committed)
+├── server/                   # Dev HTTP server (FastAPI; not inside src/safe_exam)
+│   ├── main.py               # GET /health, GET /auth/check, POST /clip/upload
+│   ├── requirements.txt      # fastapi, uvicorn, python-multipart
+│   └── storage/              # Uploaded clips (gitignored)
 ├── scripts/                  # Standalone tools
 │   ├── detector_test.py      # One-off YOLO demo
 │   ├── face_gaze_demo.py     # One-off face-gaze demo
@@ -137,7 +142,23 @@ Planned entry once #39 is implemented:
 python -m safe_exam.agent
 ```
 
-Example deployment settings: [`config/ex.config.yml`](config/ex.config.yml).
+Example deployment settings: [`config/ex.config.yml`](config/ex.config.yml). Point `server_url` at the local dev server (`http://127.0.0.1:8000`) when testing against it. HTTP shapes are in [`docs/api-contract.md`](docs/api-contract.md).
+
+### Dev server (Phase A)
+
+The agent (`src/safe_exam/`) and the server (`server/`) are **two processes**. The server is not part of the `safe_exam` package.
+
+**Implemented now:** `GET /health`, `GET /auth/check`, `POST /clip/upload`.  
+**After #39:** `POST /session/start`, `POST /session/end`, `POST /metadata/ingest`.
+
+```bash
+pip install -r server/requirements.txt
+uvicorn server.main:app --reload --port 8000
+```
+
+Then open [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health) or [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). Uploaded clips land in `server/storage/clips/{exam_id}/{student_id}/` (gitignored).
+
+Default Bearer tokens for local use: `replace-me`, `dev`, `demo` (same placeholders as `config/ex.config.yml`).
 
 ## Setup
 

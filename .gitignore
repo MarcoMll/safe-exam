@@ -36,3 +36,6 @@ models/*.onnx
 # OS
 .DS_Store
 Thumbs.db
+
+# Dev server uploads (local only)
+server/storage/
