@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from pathlib import Path
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from urllib.parse import urljoin
 
 import cv2  # pylint: disable=no-member
@@ -17,7 +18,10 @@ from safe_exam.agent.config import Config
 from safe_exam.agent.fusion import FlagEvent
 from safe_exam.processor.frame_result import FrameResult, ProcessFrameOutput
 
+logger = logging.getLogger(__name__)
+
 METADATA_INGEST_PATH = "metadata/ingest"
+CLIP_UPLOAD_PATH = "clip/upload"
 DEFAULT_CLIP_DIR = Path("data/staged_clips")
 QUEUE_FILENAME = "upload_queue.jsonl"
 DEFAULT_CLIP_BITRATE = "500k"
@@ -163,6 +167,64 @@ def load_pending_uploads(queue_path: Path) -> list[tuple[Path, Path]]:
     for entry in _load_upload_queue(queue_path):
         pending.append((Path(entry["clip_path"]), Path(entry["sidecar_path"])))
     return pending
+
+
+def _remove_from_upload_queue(
+    queue_path: Path,
+    *,
+    clip_path: Path,
+    sidecar_path: Path,
+) -> None:
+    """Drop one clip/sidecar pair from the jsonl queue after a successful upload."""
+    clip_resolved = str(clip_path.resolve())
+    sidecar_resolved = str(sidecar_path.resolve())
+
+    remaining = [
+        entry
+        for entry in _load_upload_queue(queue_path)
+        if not (
+            entry.get("clip_path") == clip_resolved
+            and entry.get("sidecar_path") == sidecar_resolved
+        )
+    ]
+
+    with _queue_lock:
+        if not remaining:
+            if queue_path.is_file():
+                queue_path.unlink()
+            return
+
+        queue_path.write_text(
+            "".join(json.dumps(entry) + "\n" for entry in remaining),
+            encoding="utf-8",
+        )
+
+
+def _post_clip(
+    *,
+    endpoint_url: str,
+    auth_token: str,
+    clip_path: Path,
+    sidecar_path: Path,
+) -> int:
+    """
+    POST one staged clip to the server.
+
+    Returns the HTTP status code.
+    """
+    import requests
+
+    with clip_path.open("rb") as clip_file, sidecar_path.open("rb") as sidecar_file:
+        response = requests.post(
+            endpoint_url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            files={
+                "clip": (clip_path.name, clip_file, "video/mp4"),
+                "sidecar": (sidecar_path.name, sidecar_file, "application/json"),
+            },
+            timeout=30,
+        )
+    return response.status_code
 
 
 def _write_clip_sidecar(
@@ -358,3 +420,170 @@ def stage_clip(
     )
 
     return clip_path, sidecar_path
+
+
+class ClipUploadThread:
+    """Drain the local clip queue and POST files to the server in the background."""
+
+    def __init__(
+        self,
+        *,
+        server_url: str,
+        auth_token: str,
+        clip_dir: Path,
+        poll_interval_seconds: float = 1.0,
+        max_retries: int = 5,
+    ) -> None:
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be greater than 0")
+        if max_retries < 1:
+            raise ValueError("max_retries must be at least 1")
+
+        self.server_url = server_url.rstrip("/")
+        self.endpoint_url = urljoin(f"{self.server_url}/", CLIP_UPLOAD_PATH)
+        self.auth_token = auth_token
+        self.clip_dir = Path(clip_dir)
+        self.poll_interval_seconds = float(poll_interval_seconds)
+        self.max_retries = int(max_retries)
+
+        self.running = False
+        self._stop = Event()
+        self._thread: Thread | None = None
+        self._exhausted_clip_keys: set[str] = set()
+
+    @staticmethod
+    def _clip_key(clip_path: Path) -> str:
+        """Stable dict key for retry / exhaustion tracking."""
+        return str(clip_path.resolve())
+
+    def _backoff_seconds(self, attempt: int) -> float:
+        """Exponential backoff: 1s, 2s, 4s, 8s, ..."""
+        return float(2 ** (attempt - 1))
+
+    def start(self) -> None:
+        """Start the background upload loop. Safe to call more than once."""
+        if self.running:
+            return
+
+        self.running = True
+        self._stop.clear()
+        self._thread = Thread(
+            target=self._run,
+            name="clip-upload",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Ask the background loop to exit and wait briefly for it."""
+        self.running = False
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self.poll_interval_seconds * 2)
+            self._thread = None
+
+    def _process_pending(self) -> None:
+        """Upload the oldest queued clip, if any."""
+        queue_path = self.clip_dir / QUEUE_FILENAME
+        pending = load_pending_uploads(queue_path)
+        if not pending:
+            return
+
+        clip_path, sidecar_path = pending[0]
+        self._upload_one(clip_path, sidecar_path)
+
+    def _run(self) -> None:
+        """Poll the queue and upload one pending clip per wake-up."""
+        while not self._stop.is_set():
+            self._process_pending()
+            self._stop.wait(self.poll_interval_seconds)
+
+    def _upload_one(self, clip_path: Path, sidecar_path: Path) -> bool:
+        """Upload one clip/sidecar pair. Returns True when the server accepts it."""
+        queue_path = self.clip_dir / QUEUE_FILENAME
+        clip_key = self._clip_key(clip_path)
+
+        if not clip_path.is_file() or not sidecar_path.is_file():
+            logger.warning(
+                "Removing stale queue entry for missing files: clip=%s sidecar=%s",
+                clip_path,
+                sidecar_path,
+            )
+            _remove_from_upload_queue(
+                queue_path,
+                clip_path=clip_path,
+                sidecar_path=sidecar_path,
+            )
+            return False
+
+        if clip_key in self._exhausted_clip_keys:
+            logger.info(
+                "Skipping upload for %s until agent restart (max retries reached)",
+                clip_path.name,
+            )
+            return False
+
+        for attempt in range(1, self.max_retries + 1):
+            if self._stop.is_set():
+                return False
+
+            logger.info(
+                "Upload attempt %s/%s for %s",
+                attempt,
+                self.max_retries,
+                clip_path.name,
+            )
+            try:
+                status_code = _post_clip(
+                    endpoint_url=self.endpoint_url,
+                    auth_token=self.auth_token,
+                    clip_path=clip_path,
+                    sidecar_path=sidecar_path,
+                )
+            except Exception:
+                logger.exception("Clip upload failed for %s", clip_path.name)
+                status_code = None
+
+            if status_code == 200:
+                clip_path.unlink()
+                sidecar_path.unlink()
+                _remove_from_upload_queue(
+                    queue_path,
+                    clip_path=clip_path,
+                    sidecar_path=sidecar_path,
+                )
+                self._exhausted_clip_keys.discard(clip_key)
+                logger.info("Uploaded and removed local clip %s", clip_path.name)
+                return True
+
+            if status_code is None:
+                logger.warning(
+                    "Clip upload failed for %s due to network error",
+                    clip_path.name,
+                )
+            else:
+                logger.warning(
+                    "Clip upload rejected for %s with HTTP %s",
+                    clip_path.name,
+                    status_code,
+                )
+
+            if attempt < self.max_retries:
+                backoff = self._backoff_seconds(attempt)
+                logger.info(
+                    "Retrying %s in %.0fs (attempt %s/%s)",
+                    clip_path.name,
+                    backoff,
+                    attempt + 1,
+                    self.max_retries,
+                )
+                if self._stop.wait(backoff):
+                    return False
+
+        self._exhausted_clip_keys.add(clip_key)
+        logger.warning(
+            "Giving up on %s after %s attempts; leaving in queue for next startup",
+            clip_path.name,
+            self.max_retries,
+        )
+        return False
