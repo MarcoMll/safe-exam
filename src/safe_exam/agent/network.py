@@ -111,7 +111,10 @@ class MetadataStreamThread:
         gaze_off_seconds: float,
         fused_score: float,
     ) -> dict:
-        """Build one JSON-ready signal entry from processor and fusion output."""
+        """Build one JSON-ready signal entry from processor and fusion output.
+
+        Per-frame time is ``timestamp`` (from ``FrameResult.as_dict()``), not ``t``.
+        """
         signal = output.as_dict()
         signal["extra_person_detected"] = output.result.person_count > 1
         signal["gaze_off_seconds"] = float(gaze_off_seconds)
