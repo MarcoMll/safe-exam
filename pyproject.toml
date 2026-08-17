@@ -33,3 +33,15 @@ ignore = []
 
 [tool.ruff.lint.isort]
 known-first-party = ["safe_exam"]
+
+# FastAPI dependency/default markers are evaluated once at import, not per call.
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Header",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Form",
+]
