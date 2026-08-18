@@ -1,5 +1,6 @@
 """Clip staging, metadata stream, and clip upload. Owned by #36–#38."""
 import time
+from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
 from urllib.parse import urljoin
@@ -28,11 +29,11 @@ class MetadataStreamThread:
         self.endpoint_url = urljoin(f"{self.server_url}/", METADATA_INGEST_PATH)
         self.session_id = session_id
         self.auth_token = auth_token
-        self.interval_seconds = float(interval_seconds)
+        self.interval_seconds = interval_seconds
 
         self._lock = Lock()
         self._signals: list[dict] = []
-        self._pending_packets: Queue[dict] = Queue()
+        self._pending_batches: Queue[dict] = Queue()
 
         self._thread: Thread | None = None
         self._stop_event = Event()
@@ -91,10 +92,10 @@ class MetadataStreamThread:
 
         return signals
 
-    def _create_package(self, signals: tuple[dict, ...]) -> dict:
+    def _create_batch(self, signals: tuple[dict, ...]) -> dict:
         return  {
             "session_id": self.session_id,
-            "timestamp": time.time(),
+            "created_at": time.time(),
             "signals": list(signals),
         }
 
@@ -102,8 +103,8 @@ class MetadataStreamThread:
         signals = self._drain_signals()
 
         if len(signals) > 0:
-            package = self._create_package(signals)
-            self._pending_packets.put(package)
+            batch = self._create_batch(signals)
+            self._pending_batches.put(batch)
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
@@ -130,13 +131,30 @@ class MetadataStreamThread:
 
         return signal
 
-    def get_pending_packets(self) -> list[dict]:
-        packets = []
+    def get_pending_batches(self) -> list[dict]:
+        batches = []
 
         while True:
             try:
-                packets.append(self._pending_packets.get_nowait())
+                batches.append(self._pending_batches.get_nowait())
             except Empty:
                 break
 
-        return packets
+        return batches
+
+METADATA_SCHEMA_VERSION = 1
+class LocalBatchStore:
+    def __init__(self, store_path: Path) -> None:
+        self.store_path = store_path
+
+    def save(self, batch: dict) -> Path:
+        """Persist a batch and return its file path."""
+
+    def pending(self) -> list[Path]:
+        """Return pending batch paths from oldest to newest."""
+
+    def load(self, batch_path: Path) -> dict:
+        """Load and deserialize one batch."""
+
+    def delete(self, batch_path: Path) -> None:
+        """Delete a confirmed batch."""

@@ -1,10 +1,12 @@
 """Tests for lightweight metadata stream buffering."""
+import json
 import time
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from safe_exam.agent.network import MetadataStreamThread
+from safe_exam.agent.network import LocalBatchStore, MetadataStreamThread
 from safe_exam.detectors.face_gaze.results import FaceGazeResult
 from safe_exam.processor.frame_result import FrameResult, ProcessFrameOutput
 
@@ -134,7 +136,7 @@ def test_interval_creates_pending_packet():
 
     time.sleep(1)
 
-    packets = stream.get_pending_packets()
+    packets = stream.get_pending_batches()
     stream.stop_recording()
 
     assert len(packets) == 1
@@ -142,7 +144,7 @@ def test_interval_creates_pending_packet():
     packet = packets[0]
 
     assert packet["session_id"] == "test-session"
-    assert isinstance(packet["timestamp"], float)
+    assert isinstance(packet["created_at"], float)
     assert len(packet["signals"]) == 1
 
     signal = packet["signals"][0]
@@ -176,7 +178,7 @@ def test_stop_recording_loses_partial_packet():
 
     stream.stop_recording()
 
-    packets = stream.get_pending_packets()
+    packets = stream.get_pending_batches()
 
     assert len(packets) == 1
     assert len(packets[0]["signals"]) == 1
@@ -240,3 +242,19 @@ def test_can_start_again_after_stop():
     assert second_thread is not first_thread
 
     stream.stop_recording()
+
+def test_local_batch_store_saves_batch(tmp_path):
+    batch_store = LocalBatchStore(tmp_path)
+    batch = {
+        "schema_version": 1,
+        "batch_id": "batch-123",
+        "session_id": "session-1",
+        "created_at": 1720000000.0,
+        "signals": [],
+    }
+    path_to_batch = batch_store.save(batch)
+    assert isinstance(path_to_batch, Path)
+    assert path_to_batch.exists()
+
+    saved_batch = json.loads(path_to_batch.read_text(encoding="utf-8"))
+    assert saved_batch == batch
