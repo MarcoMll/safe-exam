@@ -2,7 +2,7 @@
 
 A modular proctoring layer for [Safe Exam Browser (SEB)](https://safeexambrowser.org/). The system uses webcam-based computer vision to detect suspicious behavior during exams — phone use, gaze off-screen, additional people in frame — and raises **flags with confidence scores** for professor review. It does not automatically remove students from exams.
 
-**Current phase:** Phase 1 — client agent scaffolding. Phase 0 detection (`capture/`, `detectors/`, `processor/`) is in place; the headless exam companion under `agent/` is the next build surface for the team.
+**Current phase:** Phase 1 — client agent. Phase 0 detection (`capture/`, `detectors/`, `processor/`) is in place; the headless exam companion under `agent/` runs the full capture → fusion → flag → upload loop against the dev server.
 
 ## What we're detecting
 
@@ -33,9 +33,9 @@ safe-exam/
 │       └── cpu-profiling/      # CPU/RAM profiling findings (#15)
 ├── models/                   # Downloaded model weights (not committed)
 ├── server/                   # Dev HTTP server (FastAPI; not inside src/safe_exam)
-│   ├── main.py               # GET /health, GET /auth/check, POST /clip/upload
+│   ├── main.py               # Dev HTTP API (health, auth, sessions, metadata, clips)
 │   ├── requirements.txt      # fastapi, uvicorn, python-multipart
-│   └── storage/              # Uploaded clips (gitignored)
+│   └── storage/              # Sessions, metadata, clips (gitignored)
 ├── scripts/                  # Standalone tools
 │   ├── detector_test.py      # One-off YOLO demo
 │   ├── face_gaze_demo.py     # One-off face-gaze demo
@@ -79,13 +79,13 @@ safe-exam/
 │   │   ├── session_stats.py  # session counters + summaries
 │   │   ├── runner.py         # live capture loop
 │   │   └── debug_overlay.py  # composite debug view
-│   ├── agent/                # Phase 1 client agent (scaffold — build in #33–#39)
+│   ├── agent/                # Phase 1 client agent (#33–#39)
 │   │   ├── __main__.py       # Entry: python -m safe_exam.agent (#39)
 │   │   ├── config.py         # YAML config loader (#33)
 │   │   ├── buffer.py         # Ring buffer (#34)
 │   │   ├── fusion.py         # Signal fusion + FlagEvent (#35)
 │   │   ├── network.py        # Clip staging, metadata stream, upload (#36–#38)
-│   │   └── session.py        # Session lifecycle (#39)
+│   │   └── session.py        # Session lifecycle orchestrator (#39)
 │   └── utils/                # Shared helpers (logging, paths)
 ├── tests/                    # Unit tests (pytest; also run in CI)
 │   └── test_intrusion_policy.py
@@ -120,43 +120,60 @@ The `processor/` package has a few clear roles:
 
 Detectors **compute** raw signals. The processor **interprets** them via `attention_policy.py` and `intrusion_policy.py`, and **aggregates** them via `session_stats.py`. Calibration experiments under `docs/experiments/` help choose policy values; they do not change detector internals.
 
-Phase 1 adds the headless client agent on top of this layer — flag logic, ring buffer, and networking live in `agent/`, not inside individual detectors. Modules under `agent/` are ownership placeholders until their issues land.
+Phase 1 adds the headless client agent on top of this layer — flag logic, ring buffer, metadata stream, clip upload, and session lifecycle live in `agent/`, not inside individual detectors.
 
 ### Client configuration
 
-Copy the example configuration:
+Copy the example configuration for deployment:
 
+```bash
 cp config/ex.config.yml config/config.yml
+```
 
 Update deployment values, then load it with:
 
+```python
 from safe_exam.agent.config import load_config
 
 config = load_config("config/config.yml")
+```
+
+[`config/ex.config.yml`](config/ex.config.yml) defaults to the local dev server (`http://127.0.0.1:8000`).
 
 ### Client agent (Phase 1)
 
-Planned entry once #39 is implemented:
+Run the full proctoring agent (checklist → session → detection loop → shutdown):
 
 ```bash
 python -m safe_exam.agent
 ```
 
-Example deployment settings: [`config/ex.config.yml`](config/ex.config.yml). Point `server_url` at the local dev server (`http://127.0.0.1:8000`) when testing against it. HTTP shapes are in [`docs/api-contract.md`](docs/api-contract.md).
+Options:
 
-### Dev server (Phase A)
+```bash
+python -m safe_exam.agent --config config/ex.config.yml --camera 0
+```
+
+HTTP shapes and endpoint status: [`docs/api-contract.md`](docs/api-contract.md).
+
+### Dev server
 
 The agent (`src/safe_exam/`) and the server (`server/`) are **two processes**. The server is not part of the `safe_exam` package.
 
-**Implemented now:** `GET /health`, `GET /auth/check`, `POST /clip/upload`.  
-**After #39:** `POST /session/start`, `POST /session/end`, `POST /metadata/ingest`.
+**Implemented:** `GET /health`, `GET /auth/check`, `POST /session/start`, `POST /session/end`, `POST /metadata/ingest`, `POST /clip/upload`.
 
 ```bash
 pip install -r server/requirements.txt
 uvicorn server.main:app --reload --port 8000
 ```
 
-Then open [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health) or [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). Uploaded clips land in `server/storage/clips/{exam_id}/{student_id}/` (gitignored).
+Then open [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health) or [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+
+Dev storage (gitignored):
+
+- `server/storage/sessions/{session_id}.json` — session records
+- `server/storage/metadata/{session_id}.jsonl` — metadata batches
+- `server/storage/clips/{exam_id}/{student_id}/` — uploaded clips
 
 Default Bearer tokens for local use: `replace-me`, `dev`, `demo` (same placeholders as `config/ex.config.yml`).
 
