@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-import server.main as server_main
+_SERVER_MAIN_PATH = Path(__file__).resolve().parents[1] / "server" / "main.py"
+_SERVER_SPEC = importlib.util.spec_from_file_location(
+    "test_server_main",
+    _SERVER_MAIN_PATH,
+)
+assert _SERVER_SPEC is not None and _SERVER_SPEC.loader is not None
+server_main = importlib.util.module_from_spec(_SERVER_SPEC)
+sys.modules["test_server_main"] = server_main
+_SERVER_SPEC.loader.exec_module(server_main)
 
 AUTH_HEADERS = {"Authorization": "Bearer replace-me"}
 
