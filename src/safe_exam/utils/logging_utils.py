@@ -24,3 +24,8 @@ def configure_logging(
         handlers=handlers,
         force=True,
     )
+
+    json_formatter = JsonFormatter()
+    file_handler.setFormatter(json_formatter)
+
+    root_logger.addHandler(file_handler)

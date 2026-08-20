@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+# Logging setup
+# logs are namespaced under the module name through
+# `__name__` = "safe_exam.agent.fusion" variable
+import logging
 from dataclasses import dataclass
 
 from safe_exam.agent.config import (
@@ -16,6 +20,8 @@ from safe_exam.processor.attention_policy import (
     is_attention_off_center,
 )
 from safe_exam.processor.frame_result import FrameResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -146,8 +152,15 @@ class SignalFuser:
         if score >= self.fusion_config.flag_threshold:
             if self._can_emit_flag(frame_result.timestamp):
                 self.last_flag_time = frame_result.timestamp
-                return FlagEvent(
+                flag_event = FlagEvent(
                     timestamp=frame_result.timestamp, score=score, reasons=reasons
                 )
+
+                logger.warning(
+                    "FlagEvent triggered",
+                    extra={"event": "flag_event", "flag": flag_event},
+                )
+
+                return flag_event
 
         return None
