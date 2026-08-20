@@ -111,6 +111,14 @@ def test_exam_session_shutdown_calls_end_session(
     session.started_at = 1000.0
     session.flag_count = 2
 
+    class FakeUploader:
+        clips_uploaded = 2
+
+        def stop(self) -> None:
+            return None
+
+    session.clip_uploader = FakeUploader()  # type: ignore[assignment]
+
     posted: list[dict] = []
 
     def fake_end_session(

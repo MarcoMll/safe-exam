@@ -275,17 +275,11 @@ class ExamSession:
                     0.0,
                     timestamp - self.fuser.gaze_off_start_time,
                 )
-            gaze_violation = (
-                gaze_off_seconds >= self.fuser.gaze_config.duration_threshold_seconds
-            )
-            fused_score, _ = self.fuser.fuse_signals(output.result, gaze_violation)
-            if flag is not None:
-                fused_score = flag.score
 
             self.metadata_stream.record_frame(
                 output,
                 gaze_off_seconds=gaze_off_seconds,
-                fused_score=fused_score,
+                fused_score=self.fuser.last_fused_score,
             )
 
             if flag is None:
@@ -331,7 +325,9 @@ class ExamSession:
             clips_pending = len(
                 load_pending_uploads(self.config.clip_dir / QUEUE_FILENAME)
             )
-        clips_uploaded = max(0, self.flag_count - clips_pending)
+        clips_uploaded = (
+            self.clip_uploader.clips_uploaded if self.clip_uploader is not None else 0
+        )
 
         if self.session_id is not None:
             end_session(

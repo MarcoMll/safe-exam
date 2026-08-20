@@ -22,15 +22,15 @@ Detectors plug into a shared capture loop and are merged into a single `process_
 safe-exam/
 ├── .github/workflows/        # CI (lint + pytest on pull requests)
 ├── config/
-│   └── ex.config.yml         # Example client agent config (#33)
+│   └── ex.config.yml         # Example client agent config (copy → config.yml)
 ├── docs/
 │   ├── api-contract.md       # Agent ↔ server HTTP contract
 │   ├── phase-0-findings.md   # Phase 0 go/no-go consolidation
 │   └── experiments/
-│       ├── phone-calibration/  # Threshold findings + result CSVs (#12)
-│       ├── gaze-calibration/   # Off-screen duration findings (#13)
-│       ├── person-intrusion/   # Spatial intrusion policy findings (#14)
-│       └── cpu-profiling/      # CPU/RAM profiling findings (#15)
+│       ├── phone-calibration/
+│       ├── gaze-calibration/
+│       ├── person-intrusion/
+│       └── cpu-profiling/
 ├── models/                   # Downloaded model weights (not committed)
 ├── server/                   # Dev HTTP server (FastAPI; not inside src/safe_exam)
 │   ├── main.py               # Dev HTTP API (health, auth, sessions, metadata, clips)
@@ -39,46 +39,16 @@ safe-exam/
 ├── scripts/                  # Standalone tools
 │   ├── detector_test.py      # One-off YOLO demo
 │   ├── face_gaze_demo.py     # One-off face-gaze demo
+│   ├── stage_clip_demo.py    # Local clip staging demo (#36)
 │   └── experiments/          # Durable experiment tools (kept long-term)
 │       ├── phone_calibration/
-│       │   ├── __main__.py   # CLI entrypoint
-│       │   ├── record.py     # Live capture session
-│       │   └── analyze.py    # Summarize (no camera)
 │       ├── gaze_calibration/
-│       │   ├── __main__.py   # CLI entrypoint
-│       │   ├── record.py     # Live capture session
-│       │   └── analyze.py    # Summarize + backtest (no camera)
 │       ├── person_intrusion/
-│       │   ├── __main__.py   # CLI entrypoint
-│       │   ├── record.py     # Live capture session
-│       │   └── analyze.py    # Summarize + backtest (no camera)
 │       └── cpu_profile/
-│           ├── __main__.py   # CLI entrypoint
-│           └── profile.py    # Timed CPU/RAM sampling loop
 ├── src/safe_exam/            # Main application package
 │   ├── capture/              # Webcam capture (#7)
-│   │   ├── capture_config.py
-│   │   └── capture.py
 │   ├── detectors/            # Detection modules (#8–#10)
-│   │   ├── object/           # YOLO — phone + person
-│   │   │   ├── config.py
-│   │   │   ├── results.py    # DetectedBox
-│   │   │   ├── detector.py
-│   │   │   └── overlay.py
-│   │   └── face_gaze/        # MediaPipe — head pose + iris gaze
-│   │       ├── config.py
-│   │       ├── results.py    # FaceGazeResult
-│   │       ├── detector.py
-│   │       ├── overlay.py
-│   │       └── iris_estimation.py  # internal helper
 │   ├── processor/            # Unified frame processor (#11)
-│   │   ├── frame_result.py   # FrameResult schema
-│   │   ├── frame_processor.py
-│   │   ├── attention_policy.py  # runtime off-center interpretation
-│   │   ├── intrusion_policy.py  # spatial multi-person intrusion rules
-│   │   ├── session_stats.py  # session counters + summaries
-│   │   ├── runner.py         # live capture loop
-│   │   └── debug_overlay.py  # composite debug view
 │   ├── agent/                # Phase 1 client agent (#33–#39)
 │   │   ├── __main__.py       # Entry: python -m safe_exam.agent (#39)
 │   │   ├── config.py         # YAML config loader (#33)
@@ -88,11 +58,23 @@ safe-exam/
 │   │   └── session.py        # Session lifecycle orchestrator (#39)
 │   └── utils/                # Shared helpers (logging, paths)
 ├── tests/                    # Unit tests (pytest; also run in CI)
-│   └── test_intrusion_policy.py
+│   ├── test_agent_config.py
+│   ├── test_attention_policy.py
+│   ├── test_buffer_ring.py
+│   ├── test_clip_staging.py
+│   ├── test_clip_upload.py
+│   ├── test_fusion.py
+│   ├── test_intrusion_policy.py
+│   ├── test_metadata_stream.py
+│   ├── test_server_phase_b.py
+│   ├── test_session.py
+│   └── test_session_stats.py
 ├── requirements.txt          # Runtime dependencies
 ├── requirements-dev.txt      # Dev tools (formatting, linting, hooks)
 └── pyproject.toml            # Tool configuration (Black, Ruff)
 ```
+
+Runtime dirs (gitignored, created on use): `data/staged_clips/`, `data/metadata_batches/`, `logs/`, `server/storage/`.
 
 `src/safe_exam/` is the main application package. Import detectors from their subpackages:
 
@@ -124,13 +106,13 @@ Phase 1 adds the headless client agent on top of this layer — flag logic, ring
 
 ### Client configuration
 
-Copy the example configuration for deployment:
+Copy the example configuration once for local/deploy use:
 
 ```bash
 cp config/ex.config.yml config/config.yml
 ```
 
-Update deployment values, then load it with:
+`python -m safe_exam.agent` loads `config/config.yml` by default. Update deployment values there (gitignored). The tracked example [`config/ex.config.yml`](config/ex.config.yml) points at the local dev server (`http://127.0.0.1:8000`).
 
 ```python
 from safe_exam.agent.config import load_config
@@ -138,23 +120,28 @@ from safe_exam.agent.config import load_config
 config = load_config("config/config.yml")
 ```
 
-[`config/ex.config.yml`](config/ex.config.yml) defaults to the local dev server (`http://127.0.0.1:8000`).
-
 ### Client agent (Phase 1)
 
 Run the full proctoring agent (checklist → session → detection loop → shutdown):
 
 ```bash
+cp config/ex.config.yml config/config.yml   # once
 python -m safe_exam.agent
 ```
 
 Options:
 
 ```bash
-python -m safe_exam.agent --config config/ex.config.yml --camera 0
+python -m safe_exam.agent --config config/config.yml --camera 0
 ```
 
 HTTP shapes and endpoint status: [`docs/api-contract.md`](docs/api-contract.md).
+
+Local clip staging smoke helper (optional):
+
+```bash
+python scripts/stage_clip_demo.py
+```
 
 ### Dev server
 

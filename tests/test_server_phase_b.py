@@ -138,3 +138,48 @@ def test_metadata_ingest_unknown_session_returns_404(client: TestClient) -> None
     )
 
     assert response.status_code == 404
+
+
+def test_health_requires_no_auth(client: TestClient) -> None:
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_auth_check_accepts_known_token(client: TestClient) -> None:
+    response = client.get("/auth/check", headers=AUTH_HEADERS)
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_auth_check_rejects_missing_token(client: TestClient) -> None:
+    response = client.get("/auth/check")
+    assert response.status_code == 401
+
+
+def test_clip_upload_stores_files(client: TestClient) -> None:
+    response = client.post(
+        "/clip/upload",
+        headers=AUTH_HEADERS,
+        files={
+            "clip": ("clip.mp4", b"fake-mp4-bytes", "video/mp4"),
+            "sidecar": (
+                "clip.json",
+                b'{"exam_id":"EXAM_2026_FINAL","student_id":"S12345","timestamp":1720000000.0}',
+                "application/json",
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "stored"}
+
+    clip_path = (
+        server_main.STORAGE_ROOT / "EXAM_2026_FINAL" / "S12345" / "1720000000.mp4"
+    )
+    sidecar_path = (
+        server_main.STORAGE_ROOT / "EXAM_2026_FINAL" / "S12345" / "1720000000.json"
+    )
+    assert clip_path.is_file()
+    assert sidecar_path.is_file()
+    assert clip_path.read_bytes() == b"fake-mp4-bytes"

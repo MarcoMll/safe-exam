@@ -7,9 +7,14 @@ venv/
 config/*.yml
 !config/ex.config.yml
 
-# Staged clips / upload queue (agent #36)
+# Staged clips / upload queue / offline metadata (agent #36–#37)
 data/staged_clips/
+data/metadata_batches/
 clips/
+
+# Agent logs
+logs/
+*.log
 
 # Python
 __pycache__/

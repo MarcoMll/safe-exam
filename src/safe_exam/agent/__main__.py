@@ -16,7 +16,8 @@ from safe_exam.agent.session import (
 )
 from safe_exam.utils.logging_utils import configure_logging
 
-DEFAULT_CONFIG_PATH = Path("config/ex.config.yml")
+DEFAULT_CONFIG_PATH = Path("config/config.yml")
+EXAMPLE_CONFIG_PATH = Path("config/ex.config.yml")
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +27,10 @@ def _parse_args() -> argparse.Namespace:
         "--config",
         type=Path,
         default=DEFAULT_CONFIG_PATH,
-        help=f"Path to agent YAML config (default: {DEFAULT_CONFIG_PATH})",
+        help=(
+            f"Path to agent YAML config (default: {DEFAULT_CONFIG_PATH}). "
+            f"Copy from {EXAMPLE_CONFIG_PATH} if missing."
+        ),
     )
     parser.add_argument(
         "--camera",
@@ -37,13 +41,22 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _configure_logging_from_config(level_name: str) -> None:
+def _configure_logging_from_config(level_name: str, log_dir: Path) -> None:
     level = getattr(logging, level_name.upper(), logging.INFO)
-    configure_logging(level=level)
+    configure_logging(level=level, log_dir=log_dir)
 
 
 def main() -> int:
     args = _parse_args()
+
+    if not args.config.is_file():
+        print(
+            f"Config error: config file not found: {args.config}\n"
+            f"Copy the example first:\n"
+            f"  cp {EXAMPLE_CONFIG_PATH} {DEFAULT_CONFIG_PATH}",
+            file=sys.stderr,
+        )
+        return 1
 
     try:
         config = load_config(args.config)
@@ -51,7 +64,7 @@ def main() -> int:
         print(f"Config error: {exc}", file=sys.stderr)
         return 1
 
-    _configure_logging_from_config(config.logging.level)
+    _configure_logging_from_config(config.logging.level, config.logging.log_dir)
 
     session = ExamSession(config, camera_index=args.camera)
 

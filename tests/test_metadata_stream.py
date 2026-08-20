@@ -241,14 +241,14 @@ def test_repeated_start_does_not_create_another_thread(tmp_path: Path) -> None:
         batch_store_dir=tmp_path,
     )
 
-    stream.start_recording()
+    stream.start()
     first_thread = stream._thread
 
-    stream.start_recording()
+    stream.start()
 
     assert stream._thread is first_thread
 
-    stream.stop_recording()
+    stream.stop()
 
 
 def test_repeated_stop_does_not_fail(tmp_path: Path) -> None:
@@ -260,10 +260,10 @@ def test_repeated_stop_does_not_fail(tmp_path: Path) -> None:
         batch_store_dir=tmp_path,
     )
 
-    stream.start_recording()
+    stream.start()
 
-    stream.stop_recording()
-    stream.stop_recording()
+    stream.stop()
+    stream.stop()
 
     assert stream.recording is False
     assert stream._thread is None
@@ -278,12 +278,12 @@ def test_can_start_again_after_stop(tmp_path: Path) -> None:
         batch_store_dir=tmp_path,
     )
 
-    stream.start_recording()
+    stream.start()
     first_thread = stream._thread
 
-    stream.stop_recording()
+    stream.stop()
 
-    stream.start_recording()
+    stream.start()
     second_thread = stream._thread
 
     assert stream.recording is True
@@ -291,7 +291,7 @@ def test_can_start_again_after_stop(tmp_path: Path) -> None:
     assert second_thread.is_alive()
     assert second_thread is not first_thread
 
-    stream.stop_recording()
+    stream.stop()
 
 
 def test_flush_retries_persisted_batches_before_new_ones(
