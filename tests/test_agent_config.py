@@ -34,6 +34,7 @@ def _build_config() -> Config:
         clip_after_flag_seconds=5.0,
         clip_bitrate="500k",
         clip_dir=Path("data/staged_clips"),
+        metadata_interval_seconds=5.0,
         detectors=DetectorConfig(
             phone=PhoneConfig(
                 enabled=True,
@@ -80,6 +81,7 @@ def _build_raw_config() -> dict:
         "clip_after_flag_seconds": 5.0,
         "clip_bitrate": "500k",
         "clip_dir": "data/staged_clips",
+        "metadata_interval_seconds": 5.0,
         "detectors": {
             "phone": {
                 "enabled": True,
@@ -126,6 +128,7 @@ def test_config_exposes_session_and_capture_settings():
     assert config.clip_after_flag_seconds == 5.0
     assert config.clip_bitrate == "500k"
     assert config.clip_dir == Path("data/staged_clips")
+    assert config.metadata_interval_seconds == 5.0
 
 
 def test_config_exposes_nested_detector_settings():
@@ -203,8 +206,18 @@ def test_example_config_matches_current_schema():
     config = load_config(project_root / "config" / "ex.config.yml")
 
     assert config.sampling_fps == 5.0
+    assert config.metadata_interval_seconds == 5.0
     assert config.detectors.phone.confidence_threshold == 0.50
     assert config.auth_token == "replace-me"
+
+
+@pytest.mark.parametrize("invalid_interval", [0, -1, "5", True])
+def test_parse_config_rejects_invalid_metadata_interval(invalid_interval):
+    raw = _build_raw_config()
+    raw["metadata_interval_seconds"] = invalid_interval
+
+    with pytest.raises(ConfigError, match="metadata_interval_seconds"):
+        _parse_config(raw)
 
 
 def test_parse_config_reports_missing_nested_field():

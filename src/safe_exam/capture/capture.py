@@ -8,12 +8,25 @@ from safe_exam.capture.capture_config import CaptureConfig
 logger = logging.getLogger(__name__)
 
 
-def capture_frames(config: CaptureConfig):
-    """Yield webcam frames (numpy arrays) at roughly config.target_fps."""
-    cap = cv2.VideoCapture(config.camera_index)
+def open_camera(camera_index: int):
+    """Open a webcam and fail loudly if it is not accessible."""
+    cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
-        logger.warning("Could not open camera %s", config.camera_index)
-        raise RuntimeError(f"Could not open camera {config.camera_index}")
+        logger.warning("Could not open camera %s", camera_index)
+        raise RuntimeError(f"Could not open camera {camera_index}")
+    return cap
+
+
+def capture_frames(config: CaptureConfig, *, cap=None):
+    """Yield webcam frames (numpy arrays) at roughly config.target_fps.
+
+    When ``cap`` is provided, that open capture is reused and not released here.
+    When ``cap`` is omitted, a camera is opened for this generator and released
+    when iteration ends (demo / standalone use).
+    """
+    owns_cap = cap is None
+    if owns_cap:
+        cap = open_camera(config.camera_index)
 
     interval = 1.0 / config.target_fps
 
@@ -31,7 +44,8 @@ def capture_frames(config: CaptureConfig):
             if remaining > 0:
                 time.sleep(remaining)
     finally:
-        cap.release()
+        if owns_cap:
+            cap.release()
 
 
 def run_capture(config: CaptureConfig | None = None) -> None:

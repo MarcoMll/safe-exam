@@ -24,10 +24,8 @@ logger = logging.getLogger(__name__)
 
 METADATA_INGEST_PATH = "metadata/ingest"
 CLIP_UPLOAD_PATH = "clip/upload"
-DEFAULT_CLIP_DIR = Path("data/staged_clips")
 DEFAULT_METADATA_BATCH_DIR = Path("data/metadata_batches")
 QUEUE_FILENAME = "upload_queue.jsonl"
-DEFAULT_CLIP_BITRATE = "500k"
 METADATA_SCHEMA_VERSION = 1
 
 _queue_lock = Lock()
@@ -79,14 +77,6 @@ class MetadataStreamThread:
         if self._thread is not None:
             self._thread.join(timeout=self.interval_seconds + 5)
             self._thread = None
-
-    def start_recording(self) -> None:
-        """Compatibility alias while the session lifecycle is still taking shape."""
-        self.start()
-
-    def stop_recording(self) -> None:
-        """Compatibility alias while the session lifecycle is still taking shape."""
-        self.stop()
 
     def record_frame(
         self,
@@ -583,6 +573,7 @@ class ClipUploadThread:
         self.max_retries = int(max_retries)
 
         self.running = False
+        self.clips_uploaded = 0
         self._stop = Event()
         self._thread: Thread | None = None
         self._exhausted_clip_keys: set[str] = set()
@@ -610,8 +601,15 @@ class ClipUploadThread:
         )
         self._thread.start()
 
-    def stop(self) -> None:
-        """Ask the background loop to exit and wait briefly for it."""
+    def stop(self, *, drain_timeout_seconds: float = 60.0) -> None:
+        """Drain the upload queue, then ask the background loop to exit."""
+        deadline = time.monotonic() + max(0.0, drain_timeout_seconds)
+        queue_path = self.clip_dir / QUEUE_FILENAME
+        while time.monotonic() < deadline:
+            if not load_pending_uploads(queue_path):
+                break
+            self._process_pending()
+
         self.running = False
         self._stop.set()
         if self._thread is not None:
@@ -689,6 +687,7 @@ class ClipUploadThread:
                     sidecar_path=sidecar_path,
                 )
                 self._exhausted_clip_keys.discard(clip_key)
+                self.clips_uploaded += 1
                 logger.info("Uploaded and removed local clip %s", clip_path.name)
                 return True
 

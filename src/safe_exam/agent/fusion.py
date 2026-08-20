@@ -52,6 +52,7 @@ class SignalFuser:
         # State tracking across frames
         self.gaze_off_start_time: float | None = None
         self.last_flag_time: float | None = None
+        self.last_fused_score: float = 0.0
         # Reuse existing attention policy logic
         self.head_policy = head_policy
         self.eye_policy = eye_policy
@@ -146,6 +147,7 @@ class SignalFuser:
         gaze_violation = self._evaluate_gaze_violation(frame_result)
 
         score, reasons = self.fuse_signals(frame_result, gaze_violation)
+        self.last_fused_score = score
 
         if score >= self.fusion_config.flag_threshold:
             if self._can_emit_flag(frame_result.timestamp):

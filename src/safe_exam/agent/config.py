@@ -116,6 +116,8 @@ class Config:
     clip_bitrate: str
     # Directory where staged MP4s, sidecars, and the upload queue are stored.
     clip_dir: Path
+    # How often metadata batches are POSTed to the server (#37).
+    metadata_interval_seconds: float
 
     # Settings for all detectors.
     detectors: DetectorConfig
@@ -225,6 +227,7 @@ _TOP_LEVEL_FIELDS = {
     "clip_after_flag_seconds",
     "clip_bitrate",
     "clip_dir",
+    "metadata_interval_seconds",
     "detectors",
     "fusion",
     "logging",
@@ -426,6 +429,10 @@ def _parse_config(raw: dict) -> Config:
         clip_after_flag_seconds=clip_after,
         clip_bitrate=_expect_string(raw["clip_bitrate"], "clip_bitrate"),
         clip_dir=Path(_expect_string(raw["clip_dir"], "clip_dir")),
+        metadata_interval_seconds=_expect_positive_number(
+            raw["metadata_interval_seconds"],
+            "metadata_interval_seconds",
+        ),
         detectors=_parse_detector_config(raw["detectors"]),
         fusion=_parse_fusion_config(raw["fusion"]),
         logging=_parse_logging_config(raw["logging"]),
