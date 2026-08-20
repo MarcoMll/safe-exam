@@ -134,6 +134,37 @@ from safe_exam.agent.config import load_config
 
 config = load_config("config/config.yml")
 
+### Structured Logging
+
+The project uses a centralized, JSON-based logging system with automatic daily file rotation (30-day retention).
+
+To use the logger in your modules:
+1. **Import the standard logger**: Simply use Python's built-in `logging`.
+2. **Pass structured data via `extra`**: Any dictionary passed to `extra` is flattened into the final JSON payload. The formatter safely handles dataclasses.
+
+**Example:**
+
+```python
+import logging
+from safe_exam.agent.fusion import FlagEvent
+
+logger = logging.getLogger(__name__)
+
+# Basic logging
+logger.info("Module initialized successfully.")
+
+# Logging with structured JSON payload
+flag = FlagEvent(timestamp=123.4, score=0.9, reasons=["phone"])
+
+logger.warning(
+    "FlagEvent triggered",
+    extra={
+        "event": "flag_event",
+        "flag": flag  # Automatically serializes the dataclass
+    }
+)
+```
+
 ### Client agent (Phase 1)
 
 Planned entry once #39 is implemented:
