@@ -6,9 +6,10 @@ import argparse
 import logging
 import signal
 import sys
+from datetime import datetime
 from pathlib import Path
 
-from safe_exam.agent.config import ConfigError, load_config
+from safe_exam.agent.config import Config, ConfigError, load_config
 from safe_exam.agent.session import (
     ChecklistError,
     ExamSession,
@@ -41,9 +42,15 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _configure_logging_from_config(level_name: str, log_dir: Path) -> None:
-    level = getattr(logging, level_name.upper(), logging.INFO)
-    configure_logging(level=level, log_dir=log_dir)
+def _configure_logging_from_config(config: Config) -> None:
+    level = getattr(logging, config.logging.level.upper(), logging.INFO)
+    configure_logging(
+        log_dir=str(config.logging.log_dir),
+        exam_id=config.exam_id,
+        student_id=config.student_id,
+        date=datetime.now().strftime("%Y-%m-%d"),
+        level=level,
+    )
 
 
 def main() -> int:
@@ -64,7 +71,7 @@ def main() -> int:
         print(f"Config error: {exc}", file=sys.stderr)
         return 1
 
-    _configure_logging_from_config(config.logging.level, config.logging.log_dir)
+    _configure_logging_from_config(config)
 
     session = ExamSession(config, camera_index=args.camera)
 
