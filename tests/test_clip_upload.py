@@ -309,3 +309,38 @@ def test_background_thread_uploads_pending_clip(
     assert not clip_path.exists()
     assert not sidecar_path.exists()
     assert load_pending_uploads(queue_path) == []
+
+
+def test_stop_drains_queue_before_returning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue_path = tmp_path / "upload_queue.jsonl"
+    clip_path = tmp_path / "clip.mp4"
+    sidecar_path = tmp_path / "clip.json"
+    clip_path.write_bytes(b"fake mp4")
+    sidecar_path.write_text('{"exam_id": "X"}', encoding="utf-8")
+    _add_to_upload_queue(queue_path, clip_path=clip_path, sidecar_path=sidecar_path)
+
+    uploaded: list[str] = []
+
+    def fake_post_clip(**kwargs) -> int:
+        time.sleep(0.05)
+        uploaded.append(kwargs["clip_path"].name)
+        return 200
+
+    monkeypatch.setattr("safe_exam.agent.network._post_clip", fake_post_clip)
+
+    uploader = ClipUploadThread(
+        server_url="https://examguard.school.edu",
+        auth_token="secret",
+        clip_dir=tmp_path,
+        poll_interval_seconds=0.05,
+    )
+    # Do not start the background thread — stop() itself must drain.
+    uploader.stop(drain_timeout_seconds=5.0)
+
+    assert uploaded == ["clip.mp4"]
+    assert not clip_path.exists()
+    assert load_pending_uploads(queue_path) == []
+    assert uploader.running is False

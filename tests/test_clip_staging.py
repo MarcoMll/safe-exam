@@ -42,6 +42,7 @@ def _build_config() -> Config:
         clip_after_flag_seconds=5.0,
         clip_bitrate="500k",
         clip_dir=Path("data/staged_clips"),
+        metadata_interval_seconds=5.0,
         detectors=DetectorConfig(
             phone=PhoneConfig(enabled=True, confidence_threshold=0.5),
             gaze=GazeConfig(

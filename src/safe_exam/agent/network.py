@@ -601,8 +601,15 @@ class ClipUploadThread:
         )
         self._thread.start()
 
-    def stop(self) -> None:
-        """Ask the background loop to exit and wait briefly for it."""
+    def stop(self, *, drain_timeout_seconds: float = 60.0) -> None:
+        """Drain the upload queue, then ask the background loop to exit."""
+        deadline = time.monotonic() + max(0.0, drain_timeout_seconds)
+        queue_path = self.clip_dir / QUEUE_FILENAME
+        while time.monotonic() < deadline:
+            if not load_pending_uploads(queue_path):
+                break
+            self._process_pending()
+
         self.running = False
         self._stop.set()
         if self._thread is not None:

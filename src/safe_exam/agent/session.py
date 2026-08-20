@@ -5,15 +5,15 @@ from __future__ import annotations
 import logging
 import shutil
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 
-import cv2  # pylint: disable=no-member
 import requests
 
 from safe_exam.agent.buffer import RingBuffer
 from safe_exam.agent.config import Config, build_capture_config
-from safe_exam.agent.fusion import SignalFuser
+from safe_exam.agent.fusion import FlagEvent, SignalFuser
 from safe_exam.agent.network import (
     QUEUE_FILENAME,
     ClipUploadThread,
@@ -21,10 +21,11 @@ from safe_exam.agent.network import (
     load_pending_uploads,
     stage_clip,
 )
-from safe_exam.capture.capture import capture_frames
+from safe_exam.capture.capture import capture_frames, open_camera
 from safe_exam.detectors.face_gaze import FaceGazeConfig, FaceGazeDetector
 from safe_exam.detectors.object import ObjectDetector
 from safe_exam.processor.frame_processor import process_frame
+from safe_exam.processor.frame_result import FrameResult
 
 DISK_SPACE_FLOOR_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
 logger = logging.getLogger(__name__)
@@ -32,6 +33,14 @@ logger = logging.getLogger(__name__)
 
 class ChecklistError(RuntimeError):
     """Pre-exam check failed. Message is safe to print to the user"""
+
+
+@dataclass
+class _PendingFlag:
+    flag: FlagEvent
+    gaze_off_seconds: float
+    frame_result: FrameResult
+    ready_at: float
 
 
 def check_server(server_url: str) -> None:
@@ -76,30 +85,29 @@ def check_disk_space(path: Path, *, floor_bytes: int = DISK_SPACE_FLOOR_BYTES) -
         )
 
 
-def check_camera(camera_index: int) -> None:
-    """Open the camera and read one frame"""
-    cap = cv2.VideoCapture(camera_index)
-
+def check_camera(camera_index: int):
+    """Open the camera, read one frame, and return the open capture."""
     try:
-        if not cap.isOpened():
-            raise ChecklistError(f"Camera {camera_index} is not accessible")
-        ok, frame = cap.read()
-        if not ok or frame is None:
-            raise ChecklistError(
-                f"Camera {camera_index} opened but did not return a frame"
-            )
-    finally:
+        cap = open_camera(camera_index)
+    except RuntimeError as exc:
+        raise ChecklistError(str(exc)) from exc
+
+    ok, frame = cap.read()
+    if not ok or frame is None:
         cap.release()
+        raise ChecklistError(f"Camera {camera_index} opened but did not return a frame")
+    return cap
 
 
-def run_checklist(config: Config, *, camera_index: int = 0) -> None:
-    """Run all pre-exam checks in order. Raises ChecklistError on first failure."""
+def run_checklist(config: Config, *, camera_index: int = 0):
+    """Run all pre-exam checks in order. Returns an open camera capture."""
     logger.info("Running pre-exam checklist...")
     check_server(config.server_url)
     check_auth(config.server_url, config.auth_token)
     check_disk_space(config.clip_dir)
-    check_camera(camera_index)
+    cap = check_camera(camera_index)
     logger.info("Pre-exam checklist passed")
+    return cap
 
 
 class SessionError(RuntimeError):
@@ -189,6 +197,8 @@ class ExamSession:
         self.started_at: float | None = None
         self.flag_count: int = 0
         self._stop = Event()
+        self._cap = None
+        self._pending_flags: list[_PendingFlag] = []
 
         self.ring_buffer: RingBuffer | None = None
         self.metadata_stream: MetadataStreamThread | None = None
@@ -199,7 +209,7 @@ class ExamSession:
 
     def start(self) -> None:
         """Checklist, register with server, then start threads and detectors"""
-        run_checklist(self.config, camera_index=self.camera_index)
+        self._cap = run_checklist(self.config, camera_index=self.camera_index)
         self.session_id = start_session(self.config)
         self.started_at = time.time()
 
@@ -213,6 +223,7 @@ class ExamSession:
             server_url=self.config.server_url,
             session_id=self.session_id,
             auth_token=self.config.auth_token,
+            interval_seconds=self.config.metadata_interval_seconds,
             batch_store_dir=self.config.clip_dir.parent / "metadata_batches",
         )
         self.clip_uploader = ClipUploadThread(
@@ -238,6 +249,46 @@ class ExamSession:
         """SIGTERM / Ctrl+C land here. The loop will see this flag"""
         self._stop.set()
 
+    def _stage_pending(self, pending: _PendingFlag) -> None:
+        if self.ring_buffer is None:
+            return
+
+        frames = self.ring_buffer.extract_clip(pending.flag.timestamp)
+        if not frames:
+            logger.warning(
+                "Flag had no frames in the ring buffer at %.3f",
+                pending.flag.timestamp,
+            )
+            return
+
+        try:
+            stage_clip(
+                frames,
+                flag=pending.flag,
+                config=self.config,
+                gaze_off_seconds=pending.gaze_off_seconds,
+                frame_result=pending.frame_result,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to stage clip for flag at %.3f",
+                pending.flag.timestamp,
+            )
+
+    def _flush_ready_pending(self, now: float) -> None:
+        still_waiting: list[_PendingFlag] = []
+        for pending in self._pending_flags:
+            if now >= pending.ready_at:
+                self._stage_pending(pending)
+            else:
+                still_waiting.append(pending)
+        self._pending_flags = still_waiting
+
+    def _flush_all_pending(self) -> None:
+        for pending in self._pending_flags:
+            self._stage_pending(pending)
+        self._pending_flags.clear()
+
     def run(self) -> None:
         """Capture -> Process -> Fuse -> Record Metadata -> Flag -> Stage Clip"""
         if (
@@ -246,6 +297,7 @@ class ExamSession:
             or self.fuser is None
             or self.object_detector is None
             or self.face_gaze_detector is None
+            or self._cap is None
         ):
             raise RuntimeError("ExamSession.start() must be called before run()")
 
@@ -255,7 +307,7 @@ class ExamSession:
         )
         logger.info("Detection loop started")
 
-        for frame in capture_frames(capture_config):
+        for frame in capture_frames(capture_config, cap=self._cap):
             if self._stop.is_set():
                 break
 
@@ -266,6 +318,7 @@ class ExamSession:
             )
             timestamp = output.result.timestamp
             self.ring_buffer.add_frame(timestamp, frame)
+            self._flush_ready_pending(timestamp)
 
             flag = self.fuser.process_frame(output.result)
 
@@ -292,25 +345,19 @@ class ExamSession:
                 flag.score,
                 flag.reasons,
             )
-            frames = self.ring_buffer.extract_clip(flag.timestamp)
-            if not frames:
-                logger.warning("Flag had no frames in the ring buffer")
-                continue
-            try:
-                stage_clip(
-                    frames,
+            self._pending_flags.append(
+                _PendingFlag(
                     flag=flag,
-                    config=self.config,
                     gaze_off_seconds=gaze_off_seconds,
                     frame_result=output.result,
+                    ready_at=flag.timestamp + self.config.clip_after_flag_seconds,
                 )
-            except Exception:
-                logger.exception(
-                    "Failed to stage clip for flag at %.3f", flag.timestamp
-                )
+            )
 
     def shutdown(self) -> None:
         """Flush metadata, stop uploads, close session, close detectors"""
+        self._flush_all_pending()
+
         if self.metadata_stream is not None:
             self.metadata_stream.stop()
         if self.clip_uploader is not None:
@@ -342,5 +389,9 @@ class ExamSession:
         if self.face_gaze_detector is not None:
             self.face_gaze_detector.close()
             self.face_gaze_detector = None
+
+        if self._cap is not None:
+            self._cap.release()
+            self._cap = None
 
         logger.info("Exam session shut down")
