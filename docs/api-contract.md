@@ -8,12 +8,12 @@ Base URL comes from agent config `server_url` (local default: `http://127.0.0.1:
 
 | Endpoint | Server (`server/main.py`) | Agent |
 |----------|---------------------------|--------|
-| `GET /health` | Done (Phase A) | Used by #39 checklist |
-| `GET /auth/check` | Done (Phase A) | Used by #39 checklist |
+| `GET /health` | Done (Phase A) | Done (#39 checklist) |
+| `GET /auth/check` | Done (Phase A) | Done (#39 checklist) |
 | `POST /clip/upload` | Done (Phase A) | Done (#38) |
-| `POST /session/start` | After #39 (Phase B) | #39 |
-| `POST /session/end` | After #39 (Phase B) | #39 |
-| `POST /metadata/ingest` | After #39 (Phase B) | #37 (buffer exists; POST not wired) |
+| `POST /session/start` | Done (Phase B) | Done (#39) |
+| `POST /session/end` | Done (Phase B) | Done (#39) |
+| `POST /metadata/ingest` | Done (Phase B) | Done (#37) |
 
 Run the server: `uvicorn server.main:app --reload --port 8000` (see README).
 

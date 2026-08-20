@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import time
+import uuid
 from pathlib import Path
 from threading import Event, Lock, Thread
 from urllib.parse import urljoin
@@ -23,8 +25,10 @@ logger = logging.getLogger(__name__)
 METADATA_INGEST_PATH = "metadata/ingest"
 CLIP_UPLOAD_PATH = "clip/upload"
 DEFAULT_CLIP_DIR = Path("data/staged_clips")
+DEFAULT_METADATA_BATCH_DIR = Path("data/metadata_batches")
 QUEUE_FILENAME = "upload_queue.jsonl"
 DEFAULT_CLIP_BITRATE = "500k"
+METADATA_SCHEMA_VERSION = 1
 
 _queue_lock = Lock()
 
@@ -39,6 +43,7 @@ class MetadataStreamThread:
         session_id: str,
         auth_token: str,
         interval_seconds: float = 5.0,
+        batch_store_dir: Path | None = None,
     ) -> None:
         if interval_seconds <= 0:
             raise ValueError("interval_seconds must be greater than 0")
@@ -49,19 +54,31 @@ class MetadataStreamThread:
         self.session_id = session_id
         self.auth_token = auth_token
         self.interval_seconds = float(interval_seconds)
+        self.batch_store = LocalBatchStore(
+            batch_store_dir or DEFAULT_METADATA_BATCH_DIR
+        )
 
         self._signals: list[dict] = []
         self._lock = Lock()
 
         self._thread: Thread | None = None
+        self._stop = Event()
 
     def start(self) -> None:
-        """Allow the main loop to begin recording metadata entries."""
+        """Accept new frames and start the background upload loop."""
         self.recording = True
+        self._stop.clear()
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = Thread(target=self._run, name="metadata-stream", daemon=True)
+            self._thread.start()
 
     def stop(self) -> None:
-        """Stop accepting new metadata entries."""
+        """Stop recording, flush one last batch, then join the worker."""
         self.recording = False
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self.interval_seconds + 5)
+            self._thread = None
 
     def start_recording(self) -> None:
         """Compatibility alias while the session lifecycle is still taking shape."""
@@ -103,6 +120,63 @@ class MetadataStreamThread:
             self._signals.clear()
 
         return signals
+
+    def _create_batch(self, signals: tuple[dict, ...]) -> dict:
+        created_at = time.time()
+        return {
+            "schema_version": METADATA_SCHEMA_VERSION,
+            "batch_id": f"{self.session_id}-{uuid.uuid4().hex}",
+            "session_id": self.session_id,
+            "created_at": created_at,
+            "signals": list(signals),
+        }
+
+    def _upload_batch(self, batch: dict) -> bool:
+        try:
+            status_code = _post_metadata_batch(
+                endpoint_url=self.endpoint_url,
+                auth_token=self.auth_token,
+                batch=batch,
+            )
+        except Exception:
+            logger.exception("Metadata upload failed")
+            return False
+
+        if status_code != 200:
+            logger.warning("Metadata upload rejected with status %s", status_code)
+            return False
+
+        logger.info("Metadata batch uploaded (%s signals)", len(batch["signals"]))
+        return True
+
+    def _flush_pending_batches(self) -> None:
+        """Retry any locally persisted batches from oldest to newest."""
+        for batch_path in self.batch_store.pending():
+            batch = self.batch_store.load(batch_path)
+            if not self._upload_batch(batch):
+                return
+            self.batch_store.delete(batch_path)
+
+    def _flush(self) -> None:
+        """Retry persisted batches, then drain buffered signals and POST them."""
+        self._flush_pending_batches()
+        signals = self._drain_signals()
+        if not signals:
+            return
+
+        batch = self._create_batch(signals)
+        if self._upload_batch(batch):
+            return
+
+        self.batch_store.save(batch)
+
+    def _run(self) -> None:
+        """Wake every interval_seconds, flush buffered signals"""
+        while not self._stop.is_set():
+            self._flush()
+            self._stop.wait(self.interval_seconds)
+
+        self._flush()
 
     @staticmethod
     def _build_signal(
@@ -228,6 +302,65 @@ def _post_clip(
             timeout=30,
         )
     return response.status_code
+
+
+def _post_metadata_batch(
+    *,
+    endpoint_url: str,
+    auth_token: str,
+    batch: dict,
+) -> int:
+    """POST one metadata batch. Returns the HTTP status code"""
+    import requests
+
+    payload = {
+        "session_id": batch["session_id"],
+        "timestamp": batch["created_at"],
+        "signals": list(batch["signals"]),
+    }
+
+    response = requests.post(
+        endpoint_url,
+        headers={
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=15,
+    )
+    return response.status_code
+
+
+class LocalBatchStore:
+    """Persist metadata batches locally so upload failures survive process restarts."""
+
+    def __init__(self, store_path: Path) -> None:
+        self.store_path = Path(store_path)
+
+    def save(self, batch: dict) -> Path:
+        """Persist a batch and return its file path."""
+        batch_id = str(batch["batch_id"])
+        batch_path = self.store_path / f"{batch_id}.json"
+        self.store_path.mkdir(parents=True, exist_ok=True)
+        batch_path.write_text(json.dumps(batch, indent=2), encoding="utf-8")
+        return batch_path
+
+    def pending(self) -> list[Path]:
+        """Return pending batch paths from oldest to newest."""
+        if not self.store_path.is_dir():
+            return []
+        return sorted(
+            self.store_path.glob("*.json"),
+            key=lambda path: path.stat().st_mtime,
+        )
+
+    def load(self, batch_path: Path) -> dict:
+        """Load and deserialize one batch."""
+        return json.loads(batch_path.read_text(encoding="utf-8"))
+
+    def delete(self, batch_path: Path) -> None:
+        """Delete a confirmed batch."""
+        batch_path.unlink(missing_ok=True)
 
 
 def _write_clip_sidecar(

@@ -1,7 +1,8 @@
 # Example client configuration.
+# Defaults to the local dev server — copy to config/config.yml for deployment.
 
-server_url: "https://examguard.school.edu/"
-exam_id: "EXAM_2026_FINAL"
+server_url: "http://127.0.0.1:8000"
+exam_id: "EXAM_2026_TEST"
 student_id: "S12345"
 auth_token: "replace-me"
 
