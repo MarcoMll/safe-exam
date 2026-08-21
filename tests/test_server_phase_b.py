@@ -2,23 +2,13 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-_SERVER_MAIN_PATH = Path(__file__).resolve().parents[1] / "server" / "main.py"
-_SERVER_SPEC = importlib.util.spec_from_file_location(
-    "test_server_main",
-    _SERVER_MAIN_PATH,
-)
-assert _SERVER_SPEC is not None and _SERVER_SPEC.loader is not None
-server_main = importlib.util.module_from_spec(_SERVER_SPEC)
-sys.modules["test_server_main"] = server_main
-_SERVER_SPEC.loader.exec_module(server_main)
+from server import storage
+from server.main import app
 
 AUTH_HEADERS = {"Authorization": "Bearer replace-me"}
 
@@ -26,10 +16,10 @@ AUTH_HEADERS = {"Authorization": "Bearer replace-me"}
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     """Use isolated storage paths for each test."""
-    monkeypatch.setattr(server_main, "SESSIONS_ROOT", tmp_path / "sessions")
-    monkeypatch.setattr(server_main, "METADATA_ROOT", tmp_path / "metadata")
-    monkeypatch.setattr(server_main, "STORAGE_ROOT", tmp_path / "clips")
-    return TestClient(server_main.app)
+    monkeypatch.setattr(storage, "sessions_root", lambda: tmp_path / "sessions")
+    monkeypatch.setattr(storage, "metadata_root", lambda: tmp_path / "metadata")
+    monkeypatch.setattr(storage, "clips_root", lambda: tmp_path / "clips")
+    return TestClient(app)
 
 
 def test_session_start_returns_uuid(client: TestClient) -> None:
@@ -43,7 +33,7 @@ def test_session_start_returns_uuid(client: TestClient) -> None:
     session_id = response.json()["session_id"]
     assert session_id
 
-    record_path = server_main.SESSIONS_ROOT / f"{session_id}.json"
+    record_path = storage.sessions_root() / f"{session_id}.json"
     record = json.loads(record_path.read_text(encoding="utf-8"))
     assert record["status"] == "open"
     assert record["exam_id"] == "EXAM_2026_FINAL"
@@ -73,7 +63,7 @@ def test_session_end_closes_existing_session(client: TestClient) -> None:
     assert end.json() == {"status": "closed"}
 
     record = json.loads(
-        (server_main.SESSIONS_ROOT / f"{session_id}.json").read_text(encoding="utf-8")
+        (storage.sessions_root() / f"{session_id}.json").read_text(encoding="utf-8")
     )
     assert record["status"] == "closed"
     assert record["flag_count"] == 1
@@ -118,7 +108,7 @@ def test_metadata_ingest_appends_jsonl(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json() == {"received": 1}
 
-    metadata_path = server_main.METADATA_ROOT / f"{session_id}.jsonl"
+    metadata_path = storage.metadata_root() / f"{session_id}.jsonl"
     lines = metadata_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
     batch = json.loads(lines[0])
@@ -143,7 +133,9 @@ def test_metadata_ingest_unknown_session_returns_404(client: TestClient) -> None
 def test_health_requires_no_auth(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    assert "version" in body
 
 
 def test_auth_check_accepts_known_token(client: TestClient) -> None:
@@ -174,11 +166,9 @@ def test_clip_upload_stores_files(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json() == {"status": "stored"}
 
-    clip_path = (
-        server_main.STORAGE_ROOT / "EXAM_2026_FINAL" / "S12345" / "1720000000.mp4"
-    )
+    clip_path = storage.clips_root() / "EXAM_2026_FINAL" / "S12345" / "1720000000.mp4"
     sidecar_path = (
-        server_main.STORAGE_ROOT / "EXAM_2026_FINAL" / "S12345" / "1720000000.json"
+        storage.clips_root() / "EXAM_2026_FINAL" / "S12345" / "1720000000.json"
     )
     assert clip_path.is_file()
     assert sidecar_path.is_file()
