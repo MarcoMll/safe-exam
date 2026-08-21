@@ -32,9 +32,16 @@ safe-exam/
 │       ├── person-intrusion/
 │       └── cpu-profiling/
 ├── models/                   # Downloaded model weights (not committed)
-├── server/                   # Dev HTTP server (FastAPI; not inside src/safe_exam)
-│   ├── main.py               # Dev HTTP API (health, auth, sessions, metadata, clips)
-│   ├── requirements.txt      # fastapi, uvicorn, python-multipart
+├── server/                   # Phase 2 HTTP server (FastAPI; not inside src/safe_exam)
+│   ├── main.py               # App entry + remaining Phase A/B routes
+│   ├── config.py             # Env settings (DATABASE_URL, STORAGE_PATH, …)
+│   ├── auth.py               # Bearer token check
+│   ├── storage.py            # Paths under STORAGE_PATH
+│   ├── db.py                 # SQLAlchemy engine/session stub (#69+)
+│   ├── routes/               # Route modules (health; more coming)
+│   ├── schemas/              # Pydantic request/response models
+│   ├── models/               # SQLAlchemy ORM models (#69)
+│   ├── requirements.txt      # fastapi, uvicorn, sqlalchemy, …
 │   └── storage/              # Sessions, metadata, clips (gitignored)
 ├── scripts/                  # Standalone tools
 │   ├── detector_test.py      # One-off YOLO demo
@@ -188,6 +195,16 @@ uvicorn server.main:app --reload --port 8000
 ```
 
 Then open [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health) or [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+
+Environment variables (optional for local Phase A/B; required later for Postgres):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DATABASE_URL` | local Postgres URL in `server/config.py` | SQLAlchemy connection (#69+) |
+| `STORAGE_PATH` | `server/storage` | Sessions, metadata, clips on disk |
+| `SECRET_KEY` | `dev-secret-change-me` | Reserved for Phase 2 auth hardening |
+| `SERVER_VERSION` | `0.1.0` | Returned by `GET /health` |
+| `EXAMGUARD_DEV_TOKEN` | _(unset)_ | Extra accepted Bearer token |
 
 Dev storage (gitignored):
 

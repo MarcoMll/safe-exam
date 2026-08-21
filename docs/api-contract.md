@@ -42,8 +42,10 @@ Pre-exam checklist: is the server up?
 **Response `200`:**
 
 ```json
-{ "status": "ok" }
+{ "status": "ok", "version": "0.1.0" }
 ```
+
+`version` comes from `SERVER_VERSION` / `server` package version. The agent checklist only requires HTTP 200.
 
 ---
 
