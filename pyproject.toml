@@ -12,6 +12,10 @@ requires-python = ">=3.10"
 [tool.hatch.build.targets.wheel]
 packages = ["src/safe_exam"]
 
+[tool.pytest.ini_options]
+# Repo-root packages (e.g. server/) are not installed via pip; put the root on path.
+pythonpath = ["."]
+
 [tool.black]
 line-length = 88
 target-version = ["py310"]
@@ -32,7 +36,7 @@ select = [
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["safe_exam"]
+known-first-party = ["safe_exam", "server"]
 
 # FastAPI dependency/default markers are evaluated once at import, not per call.
 [tool.ruff.lint.flake8-bugbear]
